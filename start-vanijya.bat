@@ -4,13 +4,13 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ===============================================================================
-echo   🌾 VANIJYA (वाणिज्य) - National Agricultural Price Discovery Portal
-echo   Smart India Hackathon 2026 | Problem Statement: SIH 26132
+echo   Vanijya - National Agricultural Price Discovery Portal
+echo   Smart India Hackathon 2026 -- Problem Statement: SIH 26132
 echo ===============================================================================
 echo.
 
 REM -----------------------------------------------------------------------------
-REM 1. Verify Node.js & npm
+REM 1. Verify Node.js and npm
 REM -----------------------------------------------------------------------------
 where node >nul 2>&1
 if errorlevel 1 goto NO_NODE
@@ -21,13 +21,10 @@ if errorlevel 1 goto NO_NPM
 echo [1/6] Node.js and npm detected.
 
 REM -----------------------------------------------------------------------------
-REM 2. Environment Configuration Check & Auto-Creation
+REM 2. Environment Configuration Check and Auto-Creation
 REM -----------------------------------------------------------------------------
 if not exist "apps\backend\.env" (
     echo [2/6] apps\backend\.env not found. Creating from .env.example template...
-    if exist "apps\backend\.env.example" (
-        copy /y "apps\backend\.env.example" "apps\backend\.env" >nul
-    )
     (
         echo # Vanijya Backend Environment Configuration
         echo MONGODB_URI=mongodb://127.0.0.1:27017/vanijya
@@ -42,7 +39,7 @@ if not exist "apps\backend\.env" (
 )
 
 REM -----------------------------------------------------------------------------
-REM 3. MongoDB Connectivity Check & Auto-Start Attempt
+REM 3. MongoDB Connectivity Check and Auto-Start Attempt
 REM -----------------------------------------------------------------------------
 echo [3/6] Checking MongoDB database connection...
 
@@ -55,7 +52,7 @@ if %errorlevel% equ 0 (
 REM Test port 27017 using PowerShell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$tcp = New-Object System.Net.Sockets.TcpClient; try { $tcp.Connect('127.0.0.1', 27017); exit 0 } catch { exit 1 } finally { $tcp.Close() }" >nul 2>&1
 if %errorlevel% neq 0 (
-    REM Check if .env contains MongoDB Atlas string (mongodb+srv://)
+    REM Check if .env contains MongoDB Atlas string
     findstr /i "mongodb+srv" "apps\backend\.env" >nul 2>&1
     if %errorlevel% equ 0 (
         echo [3/6] MongoDB Atlas Cloud connection string detected in apps\backend\.env.
@@ -101,7 +98,7 @@ if errorlevel 1 goto ERR_BUILD
 echo [5/6] Build completed successfully.
 
 REM -----------------------------------------------------------------------------
-REM 6. Launch Servers & Open Browser
+REM 6. Launch Servers and Open Browser
 REM -----------------------------------------------------------------------------
 :LAUNCH_SERVERS
 echo [6/6] Launching Vanijya Platform...
@@ -114,7 +111,7 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 "') do taskkill /f /pi
 echo Starting Backend API (Port 4000)...
 start "Vanijya Backend (Port 4000)" /D "%~dp0" cmd /k "node apps/backend/dist/main.js"
 
-REM Wait for backend initialization and seeder completion
+REM Wait for backend initialization
 echo Waiting for backend database connection...
 powershell -NoProfile -Command "for ($i=0; $i -lt 15; $i++) { try { $res = Invoke-RestMethod -Uri 'http://localhost:4000/api/health' -TimeoutSec 2 -ErrorAction Stop; if ($res.status -eq 'ok') { exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 1" >nul 2>&1
 
@@ -129,18 +126,18 @@ start http://localhost:3000
 
 echo.
 echo ===============================================================================
-echo   🌾 VANIJYA IS LIVE!
+echo   VANIJYA IS LIVE!
 echo ===============================================================================
 echo   - Unified Web Portal:     http://localhost:3000
 echo   - Public Price Discovery: http://localhost:3000/prices
 echo   - Common Login:           http://localhost:3000/login
-echo   - User Signup & KYC:      http://localhost:3000/signup
+echo   - User Signup and KYC:    http://localhost:3000/signup
 echo   - Backend Health Check:   http://localhost:4000/api/health
 echo   - Swagger API Docs:       http://localhost:4000/api/docs
 echo ===============================================================================
 echo.
 echo   PRE-CONFIGURED DEMO CREDENTIALS:
-echo   - Farmer: 9876543210        / Farmer@123  (Ramesh Patel - Nashik)
+echo   - Farmer: 9876543210 / Farmer@123  (Ramesh Patel - Nashik)
 echo   - Buyer:  buyer@freshcart.com / asdfcv321   (FreshCart Agro Ltd.)
 echo   - Admin:  admin@vanijya.gov.in / Admin@123  (Ministry Administrator)
 echo ===============================================================================
