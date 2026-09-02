@@ -9,18 +9,16 @@ import {
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import {
-  User,
-  UserDocument,
   Role,
   VerificationStatus,
   ApprovalStatus,
   AuditAction,
   NotificationType,
-} from '../database/schemas';
+} from '../database/enums';
+import { UserEntity } from '../database/types';
+import { UserRepository } from '../repositories/user.repository';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
@@ -40,7 +38,7 @@ export class AuthService {
   private loginAttempts = new Map<string, LoginAttemptTracker>();
 
   constructor(
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly userRepository: UserRepository,
     private readonly jwtService: JwtService,
     private readonly notificationsService: NotificationsService,
     private readonly auditService: AuditService,
@@ -139,19 +137,19 @@ export class AuthService {
     const userId = `${rolePrefix}-${Date.now()}`;
 
     // Duplicate Check
-    const existingPhone = await this.userModel.findOne({ phone: dto.phone }).lean();
+    const existingPhone = await this.userRepository.findByPhone(dto.phone);
     if (existingPhone) {
       throw new ConflictException('A user with this mobile number is already registered.');
     }
 
     if (dto.email) {
-      const existingEmail = await this.userModel.findOne({ email: dto.email }).lean();
+      const existingEmail = await this.userRepository.findByEmail(dto.email);
       if (existingEmail) {
         throw new ConflictException('A user with this email address is already registered.');
       }
     }
 
-    const userData: any = {
+    const userData: UserEntity = {
       _id: userId,
       name: dto.name,
       phone: dto.phone,
@@ -183,7 +181,7 @@ export class AuthService {
       updatedAt: new Date(),
     };
 
-    await this.userModel.create(userData);
+    await this.userRepository.create(userData);
     this.logger.log(`Created new MongoDB user: ${userId} (${dto.name})`);
 
     // Audit Log
@@ -227,12 +225,8 @@ export class AuthService {
     const rateLimitKey = remoteIp || dto.identifier || 'anonymous';
     this.checkRateLimit(rateLimitKey);
 
-    // 1. MongoDB Lookup
-    const user = await this.userModel
-      .findOne({
-        $or: [{ phone: dto.identifier }, { email: dto.identifier }],
-      })
-      .lean();
+    // 1. Native MongoDB Lookup
+    const user = await this.userRepository.findByIdentifier(dto.identifier);
 
     if (!user) {
       throw new UnauthorizedException('Invalid phone/email or password.');

@@ -1,21 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import {
-  User,
-  UserDocument,
-  CropLot,
-  CropLotDocument,
-  Crop,
-  CropDocument,
-  Bid,
-  BidDocument,
-  Transaction,
-  TransactionDocument,
-  Payment,
-  PaymentDocument,
-  AuditLog,
-  AuditLogDocument,
+  UserRepository,
+  LotRepository,
+  CropRepository,
+  BidRepository,
+  TransactionRepository,
+  PaymentRepository,
+  AuditRepository,
+} from '../repositories';
+import {
   CropLotStatus,
   BidStatus,
   PaymentStatus,
@@ -24,7 +17,7 @@ import {
   ApprovalStatus,
   VerificationStatus,
   NotificationType,
-} from '../database/schemas';
+} from '../database/enums';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -33,13 +26,13 @@ export class AdminService {
   private readonly logger = new Logger(AdminService.name);
 
   constructor(
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-    @InjectModel(CropLot.name) private readonly cropLotModel: Model<CropLotDocument>,
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(Bid.name) private readonly bidModel: Model<BidDocument>,
-    @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
-    @InjectModel(Payment.name) private readonly paymentModel: Model<PaymentDocument>,
-    @InjectModel(AuditLog.name) private readonly auditLogModel: Model<AuditLogDocument>,
+    private readonly userRepository: UserRepository,
+    private readonly lotRepository: LotRepository,
+    private readonly cropRepository: CropRepository,
+    private readonly bidRepository: BidRepository,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly paymentRepository: PaymentRepository,
+    private readonly auditRepository: AuditRepository,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -54,8 +47,7 @@ export class AdminService {
       totalBuyers,
       pendingFarmers,
       pendingBuyers,
-      approvedToday,
-      rejectedToday,
+      allUsers,
       activeLots,
       activeBiddingLots,
       soldLots,
@@ -66,30 +58,29 @@ export class AdminService {
       transactions,
       payments,
     ] = await Promise.all([
-      this.userModel.countDocuments({ role: Role.FARMER }),
-      this.userModel.countDocuments({ role: Role.BUYER }),
-      this.userModel.countDocuments({ role: Role.FARMER, approvalStatus: ApprovalStatus.PENDING }),
-      this.userModel.countDocuments({ role: Role.BUYER, approvalStatus: ApprovalStatus.PENDING }),
-      this.userModel.countDocuments({
-        approvalStatus: ApprovalStatus.APPROVED,
-        approvedAt: { $gte: todayStart },
-      }),
-      this.userModel.countDocuments({
-        approvalStatus: ApprovalStatus.REJECTED,
-        updatedAt: { $gte: todayStart },
-      }),
-      this.cropLotModel.countDocuments({
-        status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] },
-      }),
-      this.cropLotModel.countDocuments({ status: CropLotStatus.BIDDING }),
-      this.cropLotModel.countDocuments({ status: CropLotStatus.SOLD }),
-      this.cropLotModel.countDocuments({ status: CropLotStatus.CANCELLED }),
-      this.bidModel.countDocuments({ status: BidStatus.PENDING }),
-      this.bidModel.countDocuments({ status: BidStatus.ACCEPTED }),
-      this.bidModel.countDocuments({ status: BidStatus.WITHDRAWN }),
-      this.transactionModel.find().lean(),
-      this.paymentModel.find().lean(),
+      this.userRepository.countByRole(Role.FARMER),
+      this.userRepository.countByRole(Role.BUYER),
+      this.userRepository.countByRole(Role.FARMER, ApprovalStatus.PENDING),
+      this.userRepository.countByRole(Role.BUYER, ApprovalStatus.PENDING),
+      this.userRepository.findAll(),
+      this.lotRepository.findLots({ status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] } } as any).then((l) => l.length),
+      this.lotRepository.countByStatus(CropLotStatus.BIDDING),
+      this.lotRepository.countByStatus(CropLotStatus.SOLD),
+      this.lotRepository.countByStatus(CropLotStatus.CANCELLED),
+      this.bidRepository.countByStatus(BidStatus.PENDING),
+      this.bidRepository.countByStatus(BidStatus.ACCEPTED),
+      this.bidRepository.countByStatus(BidStatus.WITHDRAWN),
+      this.transactionRepository.findAll(),
+      this.paymentRepository.findAll(),
     ]);
+
+    const approvedToday = allUsers.filter(
+      (u) => u.approvalStatus === ApprovalStatus.APPROVED && u.approvedAt && new Date(u.approvedAt) >= todayStart,
+    ).length;
+
+    const rejectedToday = allUsers.filter(
+      (u) => u.approvalStatus === ApprovalStatus.REJECTED && u.updatedAt && new Date(u.updatedAt) >= todayStart,
+    ).length;
 
     const totalTransactionValue = transactions.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
     const completedPaymentsValue = payments
@@ -133,8 +124,12 @@ export class AdminService {
     if (filters?.role) query.role = filters.role;
     if (filters?.status) query.approvalStatus = filters.status;
 
-    const sortDirection = filters?.sort === 'asc' ? 1 : -1;
-    let users = await this.userModel.find(query).sort({ createdAt: sortDirection }).lean();
+    let users = await this.userRepository.findAll(query);
+    if (filters?.sort === 'asc') {
+      users = users.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    } else {
+      users = users.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
 
     if (filters?.search && filters.search.trim() !== '') {
       const s = filters.search.toLowerCase().trim();
@@ -150,7 +145,7 @@ export class AdminService {
     }
 
     return users.map((u) => ({
-      id: u._id || (u as any).id,
+      id: u._id,
       name: u.name,
       phone: u.phone,
       email: u.email,
@@ -184,7 +179,7 @@ export class AdminService {
   }
 
   async getUserDossier(userId: string) {
-    const user = await this.userModel.findById(userId).lean();
+    const user = await this.userRepository.findById(userId);
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found.`);
     }
@@ -194,9 +189,9 @@ export class AdminService {
     let bids: any[] = [];
 
     if (user.role === Role.FARMER) {
-      lots = await this.cropLotModel.find({ farmerId: userId }).sort({ createdAt: -1 }).lean();
+      lots = await this.lotRepository.findFarmerLots(userId);
     } else if (user.role === Role.BUYER) {
-      bids = await this.bidModel.find({ buyerId: userId }).sort({ createdAt: -1 }).lean();
+      bids = await this.bidRepository.findByBuyer(userId);
     }
 
     return {
@@ -230,43 +225,27 @@ export class AdminService {
         approvedAt: user.approvedAt,
       },
       lots: lots.map((l) => ({ ...l, id: l._id })),
-      bids: bids.map((b) => ({ ...b, id: b._id })),
+      bids: bids.map((b) => ({ ...b, id: b._id, price: b.amount })),
       auditLogs,
     };
   }
 
   private async auditModelLogsForActor(actorId: string) {
-    const logs = await this.auditLogModel
-      .find({ actorId })
-      .sort({ timestamp: -1 })
-      .limit(20)
-      .lean();
+    const logs = await this.auditRepository.findByActor(actorId, 20);
     return logs.map((l) => ({ ...l, id: l._id }));
   }
 
   async approveUser(userId: string, adminId: string) {
-    const user = await this.userModel.findById(userId).lean();
+    const user = await this.userRepository.findById(userId);
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    const updated = await this.userModel
-      .findByIdAndUpdate(
-        userId,
-        {
-          $set: {
-            approvalStatus: ApprovalStatus.APPROVED,
-            verificationStatus: VerificationStatus.VERIFIED,
-            isVerified: true,
-            approvedBy: adminId,
-            approvedAt: new Date(),
-            rejectionReason: null,
-            updatedAt: new Date(),
-          },
-        },
-        { new: true },
-      )
-      .lean();
+    const updated = await this.userRepository.updateApprovalStatus(
+      userId,
+      ApprovalStatus.APPROVED,
+      adminId,
+    );
 
     await this.auditService.log({
       actorId: adminId,
@@ -302,26 +281,17 @@ export class AdminService {
       throw new BadRequestException('A constructive rejection reason is required.');
     }
 
-    const user = await this.userModel.findById(userId).lean();
+    const user = await this.userRepository.findById(userId);
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    const updated = await this.userModel
-      .findByIdAndUpdate(
-        userId,
-        {
-          $set: {
-            approvalStatus: ApprovalStatus.REJECTED,
-            verificationStatus: VerificationStatus.REJECTED,
-            isVerified: false,
-            rejectionReason: reason.trim(),
-            updatedAt: new Date(),
-          },
-        },
-        { new: true },
-      )
-      .lean();
+    const updated = await this.userRepository.updateApprovalStatus(
+      userId,
+      ApprovalStatus.REJECTED,
+      adminId,
+      reason.trim(),
+    );
 
     await this.auditService.log({
       actorId: adminId,
@@ -358,7 +328,7 @@ export class AdminService {
   async getAllUsers(role?: Role) {
     const query: any = {};
     if (role) query.role = role;
-    const users = await this.userModel.find(query).sort({ createdAt: -1 }).lean();
+    const users = await this.userRepository.findAll(query);
     return users.map((u) => ({
       id: u._id,
       name: u.name,
@@ -380,10 +350,10 @@ export class AdminService {
     if (typeof status === 'string') query.status = status;
     else if (status && typeof status === 'object') Object.assign(query, status);
 
-    const lots = await this.cropLotModel.find(query).sort({ createdAt: -1 }).lean();
-    const crops = await this.cropModel.find().lean();
-    const farmers = await this.userModel.find().lean();
-    const bids = await this.bidModel.find().lean();
+    const lots = await this.lotRepository.findLots(query);
+    const crops = await this.cropRepository.findAll();
+    const farmers = await this.userRepository.findAll();
+    const bids = await this.bidRepository.findAll();
 
     const cropMap = new Map(crops.map((c) => [c._id, c]));
     const farmerMap = new Map(farmers.map((f) => [f._id, f]));
@@ -416,10 +386,10 @@ export class AdminService {
     if (typeof status === 'string') query.status = status;
     else if (status && typeof status === 'object') Object.assign(query, status);
 
-    const bids = await this.bidModel.find(query).sort({ createdAt: -1 }).lean();
-    const buyers = await this.userModel.find().lean();
-    const lots = await this.cropLotModel.find().lean();
-    const crops = await this.cropModel.find().lean();
+    const bids = await this.bidRepository.findAll(query);
+    const buyers = await this.userRepository.findAll();
+    const lots = await this.lotRepository.findLots();
+    const crops = await this.cropRepository.findAll();
 
     const buyerMap = new Map(buyers.map((u) => [u._id, u]));
     const lotMap = new Map(lots.map((l) => [l._id, l]));
@@ -432,6 +402,7 @@ export class AdminService {
       return {
         ...b,
         id: b._id,
+        price: b.amount,
         buyer: buyer
           ? {
               id: buyer._id,
@@ -455,12 +426,12 @@ export class AdminService {
 
   async getPlatformMetrics() {
     const [farmers, buyers, lots, bids, txns, payments] = await Promise.all([
-      this.userModel.find({ role: Role.FARMER }).lean(),
-      this.userModel.find({ role: Role.BUYER }).lean(),
-      this.cropLotModel.find().lean(),
-      this.bidModel.find().lean(),
-      this.transactionModel.find().lean(),
-      this.paymentModel.find().lean(),
+      this.userRepository.findAll({ role: Role.FARMER } as any),
+      this.userRepository.findAll({ role: Role.BUYER } as any),
+      this.lotRepository.findLots(),
+      this.bidRepository.findAll(),
+      this.transactionRepository.findAll(),
+      this.paymentRepository.findAll(),
     ]);
 
     const totalTransactionValue = txns.reduce((acc, t) => acc + (t.totalAmount || 0), 0);

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { AuditLog, AuditLogDocument, User, UserDocument, AuditAction } from '../database/schemas';
+import { AuditRepository, UserRepository } from '../repositories';
+import { AuditLogEntity } from '../database/types';
+import { AuditAction } from '../database/enums';
 
 export interface AuditEntry {
   id?: string;
@@ -23,19 +23,16 @@ export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(
-    @InjectModel(AuditLog.name) private readonly auditLogModel: Model<AuditLogDocument>,
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly auditRepository: AuditRepository,
+    private readonly userRepository: UserRepository,
   ) {}
 
   async log(entry: AuditEntry) {
-    const actor = await this.userModel.findById(entry.actorId).lean();
+    const actor = await this.userRepository.findById(entry.actorId);
     const logId = `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    const logDoc = await this.auditLogModel.create({
-      _id: logId,
-      actorId: entry.actorId,
-      actorRole: actor?.role || 'FARMER',
-      action: entry.action,
+    const metadata = {
+      ...(entry.metadata || {}),
       lotId: entry.lotId || null,
       bidId: entry.bidId || null,
       transactionId: entry.transactionId || null,
@@ -43,28 +40,35 @@ export class AuditService {
       price: entry.price || null,
       previousQuantity: entry.previousQuantity || null,
       newQuantity: entry.newQuantity || null,
-      metadata: entry.metadata || null,
+      actorRole: actor?.role || 'FARMER',
+    };
+
+    const logDoc: AuditLogEntity = {
+      _id: logId,
+      actorId: entry.actorId,
+      action: entry.action,
+      entityType: entry.lotId ? 'LOT' : entry.transactionId ? 'TRANSACTION' : entry.bidId ? 'BID' : 'USER',
+      entityId: entry.lotId || entry.transactionId || entry.bidId || entry.actorId,
+      metadata,
       timestamp: entry.createdAt || new Date(),
-    });
+      createdAt: new Date(),
+    };
+
+    const created = await this.auditRepository.create(logDoc);
 
     return {
-      ...logDoc.toObject(),
-      id: logDoc._id,
+      ...created,
+      id: created._id,
       actorName: actor?.name || 'System User',
     };
   }
 
   async getRecent(limit: number = 50) {
-    const logs = await this.auditLogModel
-      .find()
-      .sort({ timestamp: -1 })
-      .limit(limit)
-      .lean();
-
+    const logs = await this.auditRepository.findRecentActivity(limit);
     if (!logs || logs.length === 0) return [];
 
     const actorIds = Array.from(new Set(logs.map((l) => l.actorId)));
-    const users = await this.userModel.find({ _id: { $in: actorIds } }).lean();
+    const users = await this.userRepository.findAll({ _id: { $in: actorIds } } as any);
     const userMap = new Map(users.map((u) => [u._id, u]));
 
     return logs.map((l) => {
@@ -73,7 +77,7 @@ export class AuditService {
         ...l,
         id: l._id,
         actorName: actor?.name || 'User',
-        actorRole: actor?.role || l.actorRole || 'FARMER',
+        actorRole: actor?.role || (l.metadata as any)?.actorRole || 'FARMER',
       };
     });
   }

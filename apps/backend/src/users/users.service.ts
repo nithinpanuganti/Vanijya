@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { User, UserDocument, Role } from '../database/schemas';
+import { UserRepository } from '../repositories';
+import { Role } from '../database/enums';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 export interface ProfileCompletionResult {
@@ -64,12 +63,10 @@ export function computeProfileCompletion(user: any): ProfileCompletionResult {
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-  ) {}
+  constructor(private readonly userRepository: UserRepository) {}
 
   async getProfile(userId: string) {
-    const user = await this.userModel.findById(userId).lean();
+    const user = await this.userRepository.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found.');
     }
@@ -80,10 +77,7 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateUserDto) {
-    const updated = await this.userModel
-      .findByIdAndUpdate(userId, { $set: dto }, { new: true })
-      .lean();
-
+    const updated = await this.userRepository.update(userId, dto as any);
     if (!updated) {
       throw new NotFoundException('User not found.');
     }
@@ -97,10 +91,7 @@ export class UsersService {
     userId: string,
     photoData: { fileId: string; url: string; mimeType: string; size: number; uploadedAt: Date },
   ) {
-    const updated = await this.userModel
-      .findByIdAndUpdate(userId, { $set: { profilePhoto: photoData } }, { new: true })
-      .lean();
-
+    const updated = await this.userRepository.update(userId, { profilePhoto: photoData as any });
     if (!updated) {
       throw new NotFoundException('User not found.');
     }

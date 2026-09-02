@@ -5,7 +5,7 @@
 
 ## 1. MongoDB Database Setup Options
 
-Vanijya uses **MongoDB** as its single, persistent source of truth with Mongoose schemas, GeoJSON 2dsphere spatial indexing, and GridFS binary streaming for verification photos.
+Vanijya uses **MongoDB** as its single, persistent source of truth with the official **MongoDB native Node.js driver (`mongodb`)**, dedicated Repository Architecture, GeoJSON 2dsphere spatial indexing, native `GridFSBucket` binary streaming for verification photos, and atomic multi-document transaction sessions.
 
 ### Option A: Local MongoDB (Development / Local Server)
 1. **Install MongoDB Community Server**:

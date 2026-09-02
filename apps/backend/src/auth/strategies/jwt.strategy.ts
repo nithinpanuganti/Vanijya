@@ -1,16 +1,12 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { User, UserDocument } from '../../database/schemas';
+import { UserRepository } from '../../repositories/user.repository';
 import { computeProfileCompletion } from '../../users/users.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-  ) {
+  constructor(private readonly userRepository: UserRepository) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -19,15 +15,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: { sub: string; role: string }) {
-    const user = (await this.userModel.findById(payload.sub).lean()) as any;
+    const user = await this.userRepository.findById(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User not found or session expired');
     }
 
-    const { password, passwordHash, ...safeUser } = user;
+    const { passwordHash, ...safeUser } = user;
     const completion = computeProfileCompletion(user);
     return {
-      id: user._id || user.id,
+      id: user._id,
       ...safeUser,
       ...completion,
     };

@@ -88,7 +88,7 @@
 - 1-click instantaneous switching between **English**, **हिंदी (Hindi)**, and **తెలుగు (Telugu)** across all 17 routes, status badges, forms, and validation prompts.
 
 ### 8. 🍃 Modern MongoDB Data Layer (Local or Atlas)
-- Robust Mongoose schemas with 2dsphere indexing, GridFS streaming bucket, atomic multi-document transaction handling, and auto-seeding demo data on fresh environment startup.
+- Robust official native MongoDB Node.js driver (`mongodb`) with clean Repository Layer, 2dsphere spatial indexing, native GridFS streaming bucket, atomic multi-document transaction handling, and auto-seeding demo data on fresh environment startup.
 
 ---
 

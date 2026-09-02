@@ -1,21 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Notification, NotificationDocument } from '../database/schemas';
+import { NotificationRepository } from '../repositories';
+import { NotificationEntity } from '../database/types';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(
-    @InjectModel(Notification.name)
-    private readonly notificationModel: Model<NotificationDocument>,
-  ) {}
+  constructor(private readonly notificationRepository: NotificationRepository) {}
 
   async create(dto: CreateNotificationDto) {
     const notifId = `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-    const created = await this.notificationModel.create({
+    const notificationData: NotificationEntity = {
       _id: notifId,
       recipientId: dto.recipientId,
       type: dto.type,
@@ -25,42 +21,29 @@ export class NotificationsService {
       entityId: dto.entityId || null,
       isRead: false,
       createdAt: new Date(),
-    });
-    return { ...created.toObject(), id: created._id };
+      updatedAt: new Date(),
+    };
+
+    const created = await this.notificationRepository.create(notificationData);
+    return { ...created, id: created._id };
   }
 
   async findAllForUser(userId: string, limit: number = 20) {
-    const list = await this.notificationModel
-      .find({ recipientId: userId })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    if (!list || list.length === 0) return [];
+    const list = await this.notificationRepository.findByRecipient(userId, limit);
     return list.map((n) => ({ ...n, id: n._id }));
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    const count = await this.notificationModel.countDocuments({
-      recipientId: userId,
-      isRead: false,
-    });
-    return count;
+    return this.notificationRepository.countUnread(userId);
   }
 
   async markAsRead(notificationId: string, userId: string) {
-    await this.notificationModel.updateOne(
-      { _id: notificationId, recipientId: userId },
-      { $set: { isRead: true } },
-    );
-    return { success: true };
+    const success = await this.notificationRepository.markRead(notificationId, userId);
+    return { success };
   }
 
   async markAllAsRead(userId: string) {
-    const res = await this.notificationModel.updateMany(
-      { recipientId: userId, isRead: false },
-      { $set: { isRead: true } },
-    );
-    return { success: true, count: res.modifiedCount };
+    const count = await this.notificationRepository.markAllRead(userId);
+    return { success: true, count };
   }
 }

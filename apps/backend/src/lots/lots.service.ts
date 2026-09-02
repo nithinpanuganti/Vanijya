@@ -1,24 +1,20 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import {
-  CropLot,
-  CropLotDocument,
-  Crop,
-  CropDocument,
-  User,
-  UserDocument,
-  Bid,
-  BidDocument,
-  Transaction,
-  TransactionDocument,
-  Payment,
-  PaymentDocument,
+  LotRepository,
+  CropRepository,
+  UserRepository,
+  BidRepository,
+  TransactionRepository,
+  PaymentRepository,
+} from '../repositories';
+import {
+  CropLotEntity,
   CropLotStatus,
   QualityGrade,
+  CropUnit,
   Role,
   AuditAction,
-} from '../database/schemas';
+} from '../database';
 import { CreateCropLotDto, UpdateCropLotDto, QueryLotsDto } from './dto/create-lot.dto';
 import { AuditService } from '../audit/audit.service';
 import { UsersService } from '../users/users.service';
@@ -28,12 +24,12 @@ export class LotsService {
   private readonly logger = new Logger(LotsService.name);
 
   constructor(
-    @InjectModel(CropLot.name) private readonly cropLotModel: Model<CropLotDocument>,
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-    @InjectModel(Bid.name) private readonly bidModel: Model<BidDocument>,
-    @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
-    @InjectModel(Payment.name) private readonly paymentModel: Model<PaymentDocument>,
+    private readonly lotRepository: LotRepository,
+    private readonly cropRepository: CropRepository,
+    private readonly userRepository: UserRepository,
+    private readonly bidRepository: BidRepository,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly paymentRepository: PaymentRepository,
     private readonly auditService: AuditService,
     private readonly usersService: UsersService,
   ) {}
@@ -41,8 +37,8 @@ export class LotsService {
   private enrichLot(lot: any) {
     const bids = lot.bids || [];
     const activeBids = bids.filter((b: any) => b.status === 'PENDING');
-    const highestBid = bids.length > 0 ? Math.max(...bids.map((b: any) => b.price)) : null;
-    const highestActiveBid = activeBids.length > 0 ? Math.max(...activeBids.map((b: any) => b.price)) : null;
+    const highestBid = bids.length > 0 ? Math.max(...bids.map((b: any) => b.price || b.amount)) : null;
+    const highestActiveBid = activeBids.length > 0 ? Math.max(...activeBids.map((b: any) => b.price || b.amount)) : null;
 
     return {
       ...lot,
@@ -70,24 +66,25 @@ export class LotsService {
     }
 
     const lotId = `lot-${Date.now()}`;
-    const lotData: Partial<CropLot> = {
+    const lotData: CropLotEntity = {
       _id: lotId,
       farmerId,
       cropId: dto.cropId,
       quantity: Number(dto.quantity),
-      unit: dto.unit || 'QUINTAL',
+      unit: (dto.unit as CropUnit) || CropUnit.QUINTAL,
       expectedPrice: Number(dto.expectedPrice),
       qualityGrade: (dto.qualityGrade as QualityGrade) || QualityGrade.GRADE_A,
+      district: profile?.district || 'Nashik',
+      state: profile?.state || 'Maharashtra',
       location: dto.location || profile?.location || 'Pimpalgaon Farm Gate, Niphad, Nashik',
-      geoPoint: profile?.geoPoint || null,
       harvestDate: dto.harvestDate ? new Date(dto.harvestDate) : new Date(),
       status: CropLotStatus.OPEN,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    const crop = await this.cropModel.findById(dto.cropId).lean();
-    const created = await this.cropLotModel.create(lotData);
+    const crop = await this.cropRepository.findById(dto.cropId);
+    const created = await this.lotRepository.create(lotData);
 
     await this.auditService.log({
       actorId: farmerId,
@@ -99,7 +96,7 @@ export class LotsService {
     });
 
     return this.enrichLot({
-      ...created.toObject(),
+      ...created,
       crop: crop || { name: 'Crop', category: 'General' },
       farmer: profile || { name: 'Farmer' },
       bids: [],
@@ -114,16 +111,16 @@ export class LotsService {
     if (query.status) filter.status = query.status;
     if (query.qualityGrade) filter.qualityGrade = query.qualityGrade;
 
-    const lots = await this.cropLotModel.find(filter).sort({ createdAt: -1 }).lean();
+    const lots = await this.lotRepository.findLots(filter);
     if (!lots || lots.length === 0) {
       return [];
     }
 
-    const crops = await this.cropModel.find().lean();
-    const farmers = await this.userModel.find().lean();
-    const bids = await this.bidModel.find().lean();
-    const txns = await this.transactionModel.find().lean();
-    const payments = await this.paymentModel.find().lean();
+    const crops = await this.cropRepository.findAll();
+    const farmers = await this.userRepository.findAll();
+    const bids = await this.bidRepository.findAll();
+    const txns = await this.transactionRepository.findAll();
+    const payments = await this.paymentRepository.findAll();
 
     const cropMap = new Map(crops.map((c) => [c._id, c]));
     const farmerMap = new Map(farmers.map((f) => [f._id, f]));
@@ -150,7 +147,7 @@ export class LotsService {
               profilePhoto: farmer.profilePhoto,
             }
           : { name: 'Farmer' },
-        bids: lotBids.map((b) => ({ ...b, id: b._id })),
+        bids: lotBids.map((b) => ({ ...b, id: b._id, price: b.amount })),
         transaction: txn
           ? {
               ...txn,
@@ -165,20 +162,20 @@ export class LotsService {
   }
 
   async findOne(id: string) {
-    const lot = await this.cropLotModel.findById(id).lean();
+    const lot = await this.lotRepository.findById(id);
     if (!lot) {
       throw new NotFoundException(`Crop Lot with ID ${id} not found.`);
     }
 
-    const crop = await this.cropModel.findById(lot.cropId).lean();
-    const farmer = await this.userModel.findById(lot.farmerId).lean();
-    const bids = await this.bidModel.find({ lotId: lot._id }).sort({ price: -1 }).lean();
-    const txn = await this.transactionModel.findOne({ lotId: lot._id }).lean();
+    const crop = await this.cropRepository.findById(lot.cropId);
+    const farmer = await this.userRepository.findById(lot.farmerId);
+    const bids = await this.bidRepository.findByLot(lot._id);
+    const txn = await this.transactionRepository.findByLotId(lot._id);
     let payment: any = null;
     let buyer: any = null;
     if (txn) {
-      payment = await this.paymentModel.findOne({ transactionId: txn._id }).lean();
-      buyer = await this.userModel.findById(txn.buyerId).lean();
+      payment = await this.paymentRepository.findByTransactionId(txn._id);
+      buyer = await this.userRepository.findById(txn.buyerId);
     }
 
     return this.enrichLot({
@@ -196,7 +193,7 @@ export class LotsService {
             profilePhoto: farmer.profilePhoto,
           }
         : { name: 'Farmer' },
-      bids: bids.map((b) => ({ ...b, id: b._id })),
+      bids: bids.map((b) => ({ ...b, id: b._id, price: b.amount })),
       transaction: txn
         ? {
             ...txn,
@@ -218,10 +215,7 @@ export class LotsService {
       throw new BadRequestException('Sold lots cannot be modified.');
     }
 
-    const updated = await this.cropLotModel
-      .findByIdAndUpdate(lotId, { $set: dto }, { new: true })
-      .lean();
-
+    const updated = await this.lotRepository.update(lotId, dto as any);
     if (!updated) {
       throw new NotFoundException(`Crop Lot with ID ${lotId} not found.`);
     }
@@ -238,10 +232,7 @@ export class LotsService {
       throw new BadRequestException('A sold lot cannot be cancelled.');
     }
 
-    const updated = await this.cropLotModel
-      .findByIdAndUpdate(lotId, { $set: { status: CropLotStatus.CANCELLED } }, { new: true })
-      .lean();
-
+    const updated = await this.lotRepository.updateStatus(lotId, CropLotStatus.CANCELLED);
     if (!updated) {
       throw new NotFoundException(`Crop Lot with ID ${lotId} not found.`);
     }

@@ -1,33 +1,27 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Market, MarketDocument, MandiPrice, MandiPriceDocument } from '../database/schemas';
+import { MarketRepository, MandiPriceRepository } from '../repositories';
 
 @Injectable()
 export class MarketsService {
   private readonly logger = new Logger(MarketsService.name);
 
   constructor(
-    @InjectModel(Market.name) private readonly marketModel: Model<MarketDocument>,
-    @InjectModel(MandiPrice.name) private readonly mandiPriceModel: Model<MandiPriceDocument>,
+    private readonly marketRepository: MarketRepository,
+    private readonly mandiPriceRepository: MandiPriceRepository,
   ) {}
 
   async findAll() {
-    const markets = await this.marketModel.find().sort({ name: 1 }).lean();
+    const markets = await this.marketRepository.findAll();
     return markets.map((m) => ({ ...m, id: m._id }));
   }
 
   async findOne(id: string) {
-    const market = await this.marketModel.findById(id).lean();
+    const market = await this.marketRepository.findById(id);
     if (!market) {
       throw new NotFoundException(`Market APMC with ID ${id} not found.`);
     }
 
-    const prices = await this.mandiPriceModel
-      .find({ marketId: market._id })
-      .sort({ date: -1 })
-      .limit(10)
-      .lean();
+    const prices = await this.mandiPriceRepository.findAll({ marketId: market._id }, 10);
 
     return {
       ...market,

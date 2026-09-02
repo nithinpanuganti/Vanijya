@@ -1,99 +1,86 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken, getConnectionToken } from '@nestjs/mongoose';
 import { BidsService } from './bids.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
+import { DatabaseService } from '../database/database.service';
 import {
-  Bid,
-  CropLot,
-  Crop,
-  User,
-  Transaction,
-  Payment,
+  BidRepository,
+  LotRepository,
+  CropRepository,
+  UserRepository,
+  TransactionRepository,
+  PaymentRepository,
+} from '../repositories';
+import {
   BidStatus,
   CropLotStatus,
   Role,
   AuditAction,
   NotificationType,
-} from '../database/schemas';
+} from '../database/enums';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 describe('BidsService', () => {
   let service: BidsService;
   let audit: AuditService;
 
-  const mockBidModel = {
+  const mockBidRepository = {
     create: jest.fn(),
     findById: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
-    findByIdAndUpdate: jest.fn(),
-    updateMany: jest.fn(),
-    countDocuments: jest.fn().mockResolvedValue(0),
+    findByLot: jest.fn().mockResolvedValue([]),
+    findByBuyer: jest.fn().mockResolvedValue([]),
+    updateQuantity: jest.fn(),
+    updateStatus: jest.fn(),
+    rejectOtherBidsForLot: jest.fn(),
+    countByStatus: jest.fn().mockResolvedValue(0),
   };
 
-  const mockCropLotModel = {
+  const mockLotRepository = {
     findById: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
-    findByIdAndUpdate: jest.fn(),
-    countDocuments: jest.fn().mockResolvedValue(0),
+    findLots: jest.fn().mockResolvedValue([]),
+    updateStatus: jest.fn(),
+    countByStatus: jest.fn().mockResolvedValue(0),
   };
 
-  const mockUserModel = {
-    findById: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({
-        _id: 'usr-buyer-1',
-        name: 'FreshCart Agro Ltd.',
-        role: Role.BUYER,
-        district: 'Mumbai',
-        state: 'Maharashtra',
-      }),
+  const mockUserRepository = {
+    findById: jest.fn().mockResolvedValue({
+      _id: 'usr-buyer-1',
+      name: 'FreshCart Agro Ltd.',
+      role: Role.BUYER,
+      district: 'Mumbai',
+      state: 'Maharashtra',
     }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockCropModel = {
-    findById: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({
-        _id: 'crop-tomato',
-        name: 'Tomato',
-        category: 'Vegetables',
-      }),
+  const mockCropRepository = {
+    findById: jest.fn().mockResolvedValue({
+      _id: 'crop-tomato',
+      name: 'Tomato',
+      category: 'Vegetables',
     }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockTransactionModel = {
+  const mockTransactionRepository = {
     create: jest.fn(),
     findById: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+    findByLotId: jest.fn(),
+    findByUser: jest.fn().mockResolvedValue([]),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockPaymentModel = {
+  const mockPaymentRepository = {
     create: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+    findByTransactionId: jest.fn(),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockConnection = {
-    startSession: jest.fn().mockResolvedValue(null),
+  const mockDatabaseService = {
+    withTransaction: jest.fn().mockImplementation(async (work) => {
+      return await work({});
+    }),
   };
 
   const mockAuditService = {
@@ -123,13 +110,13 @@ describe('BidsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BidsService,
-        { provide: getModelToken(Bid.name), useValue: mockBidModel },
-        { provide: getModelToken(CropLot.name), useValue: mockCropLotModel },
-        { provide: getModelToken(Crop.name), useValue: mockCropModel },
-        { provide: getModelToken(User.name), useValue: mockUserModel },
-        { provide: getModelToken(Transaction.name), useValue: mockTransactionModel },
-        { provide: getModelToken(Payment.name), useValue: mockPaymentModel },
-        { provide: getConnectionToken(), useValue: mockConnection },
+        { provide: DatabaseService, useValue: mockDatabaseService },
+        { provide: BidRepository, useValue: mockBidRepository },
+        { provide: LotRepository, useValue: mockLotRepository },
+        { provide: CropRepository, useValue: mockCropRepository },
+        { provide: UserRepository, useValue: mockUserRepository },
+        { provide: TransactionRepository, useValue: mockTransactionRepository },
+        { provide: PaymentRepository, useValue: mockPaymentRepository },
         { provide: AuditService, useValue: mockAuditService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: UsersService, useValue: mockUsersService },
@@ -146,13 +133,11 @@ describe('BidsService', () => {
 
   describe('createBid', () => {
     it('should reject self-bidding (farmer bidding on own lot)', async () => {
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.OPEN,
-          quantity: 50,
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.OPEN,
+        quantity: 50,
       });
 
       await expect(
@@ -161,14 +146,12 @@ describe('BidsService', () => {
     });
 
     it('should reject bids with quantity exceeding lot available limit', async () => {
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.OPEN,
-          quantity: 50,
-          unit: 'QUINTAL',
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.OPEN,
+        quantity: 50,
+        unit: 'QUINTAL',
       });
 
       await expect(
@@ -177,13 +160,11 @@ describe('BidsService', () => {
     });
 
     it('should reject bids on already SOLD lots', async () => {
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.SOLD,
-          quantity: 50,
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.SOLD,
+        quantity: 50,
       });
 
       await expect(
@@ -212,13 +193,11 @@ describe('BidsService', () => {
 
   describe('modifyBidQuantity', () => {
     it('should reject modification from non-owner buyer', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          status: BidStatus.PENDING,
-          lotId: 'lot-1',
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        status: BidStatus.PENDING,
+        lotId: 'lot-1',
       });
 
       await expect(
@@ -227,22 +206,18 @@ describe('BidsService', () => {
     });
 
     it('should reject quantity modification exceeding available lot quantity', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          quantity: 80,
-          status: BidStatus.PENDING,
-          lotId: 'lot-1',
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        quantity: 80,
+        status: BidStatus.PENDING,
+        lotId: 'lot-1',
       });
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          quantity: 100,
-          unit: 'QUINTAL',
-          farmerId: 'farmer-1',
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        quantity: 100,
+        unit: 'QUINTAL',
+        farmerId: 'farmer-1',
       });
 
       await expect(
@@ -251,14 +226,12 @@ describe('BidsService', () => {
     });
 
     it('should reject modification of non-pending bids', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          quantity: 80,
-          status: BidStatus.ACCEPTED,
-          lotId: 'lot-1',
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        quantity: 80,
+        status: BidStatus.ACCEPTED,
+        lotId: 'lot-1',
       });
 
       await expect(
@@ -267,33 +240,27 @@ describe('BidsService', () => {
     });
 
     it('should allow valid quantity reduction and update bid', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          lotId: 'lot-1',
-          quantity: 80,
-          price: 2250,
-          status: BidStatus.PENDING,
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        lotId: 'lot-1',
+        quantity: 80,
+        amount: 2250,
+        status: BidStatus.PENDING,
       });
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          quantity: 100,
-          unit: 'QUINTAL',
-          farmerId: 'farmer-1',
-          cropId: 'crop-1',
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        quantity: 100,
+        unit: 'QUINTAL',
+        farmerId: 'farmer-1',
+        cropId: 'crop-1',
       });
-      mockBidModel.findByIdAndUpdate.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          quantity: 60,
-          price: 2250,
-          status: BidStatus.PENDING,
-        }),
+      mockBidRepository.updateQuantity.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        quantity: 60,
+        amount: 2250,
+        status: BidStatus.PENDING,
       });
 
       const updated = await service.modifyBidQuantity('bid-1', 'buyer-1', Role.BUYER, 60);
@@ -310,13 +277,11 @@ describe('BidsService', () => {
 
   describe('cancelBid', () => {
     it('should reject cancellation by unauthorized user', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          status: BidStatus.PENDING,
-          lotId: 'lot-1',
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        status: BidStatus.PENDING,
+        lotId: 'lot-1',
       });
 
       await expect(
@@ -325,13 +290,11 @@ describe('BidsService', () => {
     });
 
     it('should reject cancellation of an already accepted bid', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          status: BidStatus.ACCEPTED,
-          lotId: 'lot-1',
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        status: BidStatus.ACCEPTED,
+        lotId: 'lot-1',
       });
 
       await expect(
@@ -340,30 +303,24 @@ describe('BidsService', () => {
     });
 
     it('should mark pending bid as WITHDRAWN and log audit record and notify farmer', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          lotId: 'lot-1',
-          price: 2250,
-          quantity: 100,
-          status: BidStatus.PENDING,
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        lotId: 'lot-1',
+        amount: 2250,
+        quantity: 100,
+        status: BidStatus.PENDING,
       });
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          unit: 'QUINTAL',
-          cropId: 'crop-1',
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        unit: 'QUINTAL',
+        cropId: 'crop-1',
       });
-      mockBidModel.findByIdAndUpdate.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          buyerId: 'buyer-1',
-          status: BidStatus.WITHDRAWN,
-        }),
+      mockBidRepository.updateStatus.mockResolvedValue({
+        _id: 'bid-1',
+        buyerId: 'buyer-1',
+        status: BidStatus.WITHDRAWN,
       });
 
       const result = await service.cancelBid('bid-1', 'buyer-1', Role.BUYER);
@@ -378,30 +335,26 @@ describe('BidsService', () => {
 
   describe('acceptBid', () => {
     it('should cleanly accept bid and create transaction without circular JSON references', async () => {
-      mockBidModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'bid-1',
-          lotId: 'lot-1',
-          buyerId: 'buyer-1',
-          price: 2250,
-          quantity: 100,
-          status: BidStatus.PENDING,
-        }),
+      mockBidRepository.findById.mockResolvedValue({
+        _id: 'bid-1',
+        lotId: 'lot-1',
+        buyerId: 'buyer-1',
+        amount: 2250,
+        quantity: 100,
+        status: BidStatus.PENDING,
       });
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.BIDDING,
-          quantity: 100,
-          unit: 'QUINTAL',
-          cropId: 'crop-1',
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.BIDDING,
+        quantity: 100,
+        unit: 'QUINTAL',
+        cropId: 'crop-1',
       });
-      mockBidModel.findByIdAndUpdate.mockResolvedValue({});
-      mockCropLotModel.findByIdAndUpdate.mockResolvedValue({});
-      mockBidModel.updateMany.mockResolvedValue({});
-      mockTransactionModel.create.mockResolvedValue({
+      mockBidRepository.updateStatus.mockResolvedValue({});
+      mockLotRepository.updateStatus.mockResolvedValue({});
+      mockBidRepository.rejectOtherBidsForLot.mockResolvedValue(0);
+      mockTransactionRepository.create.mockResolvedValue({
         _id: 'txn-1',
         lotId: 'lot-1',
         bidId: 'bid-1',
@@ -411,39 +364,19 @@ describe('BidsService', () => {
         quantity: 100,
         totalAmount: 225000,
         status: 'COMPLETED',
-        toObject: () => ({
-          _id: 'txn-1',
-          lotId: 'lot-1',
-          bidId: 'bid-1',
-          farmerId: 'farmer-1',
-          buyerId: 'buyer-1',
-          agreedPrice: 2250,
-          quantity: 100,
-          totalAmount: 225000,
-          status: 'COMPLETED',
-        }),
       });
-      mockPaymentModel.create.mockResolvedValue({
+      mockPaymentRepository.create.mockResolvedValue({
         _id: 'pay-1',
         transactionId: 'txn-1',
         amount: 225000,
         status: 'PAID',
-        paymentReference: 'VNJ-UPI-123',
-        toObject: () => ({
-          _id: 'pay-1',
-          transactionId: 'txn-1',
-          amount: 225000,
-          status: 'PAID',
-          paymentReference: 'VNJ-UPI-123',
-        }),
+        utrNumber: 'VNJ-UPI-123',
       });
 
       const result = await service.acceptBid('bid-1', 'farmer-1', Role.FARMER);
 
       expect(result.success).toBe(true);
       expect(result).toHaveProperty('transaction');
-
-      // Crucial verification: Must be 100% serializable by JSON.stringify without circular reference errors
       expect(() => JSON.stringify(result)).not.toThrow();
       expect(() => JSON.stringify(result.transaction)).not.toThrow();
     });

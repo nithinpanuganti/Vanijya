@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
 import { AuthService } from './auth.service';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { PhotoStorageService } from '../users/photo-storage.service';
-import { User, Role, ApprovalStatus, VerificationStatus } from '../database/schemas';
+import { UserRepository } from '../repositories/user.repository';
+import { Role, ApprovalStatus, VerificationStatus } from '../database/enums';
 import {
   BadRequestException,
   ConflictException,
@@ -14,12 +14,15 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
-describe('AuthService (No CAPTCHA)', () => {
+describe('AuthService (Native MongoDB Driver)', () => {
   let service: AuthService;
   let jwtService: JwtService;
 
-  const mockUserModel = {
-    findOne: jest.fn(),
+  const mockUserRepository = {
+    findByPhone: jest.fn(),
+    findByEmail: jest.fn(),
+    findByIdentifier: jest.fn(),
+    findById: jest.fn(),
     create: jest.fn(),
   };
 
@@ -49,7 +52,7 @@ describe('AuthService (No CAPTCHA)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: UserRepository, useValue: mockUserRepository },
         { provide: JwtService, useValue: mockJwtService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: AuditService, useValue: mockAuditService },
@@ -67,10 +70,9 @@ describe('AuthService (No CAPTCHA)', () => {
 
   describe('Registration Workflow', () => {
     it('1. Farmer registration: valid data creates PENDING user and no JWT issued', async () => {
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue(null),
-      });
-      mockUserModel.create.mockResolvedValue({
+      mockUserRepository.findByPhone.mockResolvedValue(null);
+      mockUserRepository.findByEmail.mockResolvedValue(null);
+      mockUserRepository.create.mockResolvedValue({
         _id: 'usr-farmer-1',
         name: 'Ramesh Patel',
         phone: '9876543210',
@@ -97,10 +99,9 @@ describe('AuthService (No CAPTCHA)', () => {
     });
 
     it('2. Buyer registration: valid data creates PENDING user and no JWT issued', async () => {
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue(null),
-      });
-      mockUserModel.create.mockResolvedValue({
+      mockUserRepository.findByPhone.mockResolvedValue(null);
+      mockUserRepository.findByEmail.mockResolvedValue(null);
+      mockUserRepository.create.mockResolvedValue({
         _id: 'usr-buyer-1',
         name: 'FreshCart Agro',
         phone: '9876543211',
@@ -126,9 +127,7 @@ describe('AuthService (No CAPTCHA)', () => {
     });
 
     it('3. Duplicate phone registration is rejected', async () => {
-      mockUserModel.findOne.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue({ _id: 'existing-user' }),
-      });
+      mockUserRepository.findByPhone.mockResolvedValueOnce({ _id: 'existing-user' });
 
       await expect(
         service.register({
@@ -143,13 +142,8 @@ describe('AuthService (No CAPTCHA)', () => {
     });
 
     it('4. Duplicate email registration is rejected', async () => {
-      mockUserModel.findOne
-        .mockReturnValueOnce({
-          lean: jest.fn().mockResolvedValue(null), // phone check
-        })
-        .mockReturnValueOnce({
-          lean: jest.fn().mockResolvedValue({ _id: 'existing-user' }), // email check
-        });
+      mockUserRepository.findByPhone.mockResolvedValueOnce(null);
+      mockUserRepository.findByEmail.mockResolvedValueOnce({ _id: 'existing-user' });
 
       await expect(
         service.register({
@@ -194,18 +188,16 @@ describe('AuthService (No CAPTCHA)', () => {
   describe('Login & Approval Gatekeeping', () => {
     it('1. Valid approved user + valid password = successful login with JWT', async () => {
       const passwordHash = await bcrypt.hash('Farmer@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-1',
-          name: 'Ramesh Patel',
-          phone: '9876543210',
-          passwordHash,
-          role: Role.FARMER,
-          approvalStatus: ApprovalStatus.APPROVED,
-          verificationStatus: VerificationStatus.VERIFIED,
-          district: 'Nashik',
-          state: 'Maharashtra',
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-farmer-1',
+        name: 'Ramesh Patel',
+        phone: '9876543210',
+        passwordHash,
+        role: Role.FARMER,
+        approvalStatus: ApprovalStatus.APPROVED,
+        verificationStatus: VerificationStatus.VERIFIED,
+        district: 'Nashik',
+        state: 'Maharashtra',
       });
 
       const result = await service.login({
@@ -221,15 +213,13 @@ describe('AuthService (No CAPTCHA)', () => {
 
     it('2. Invalid password = login rejected (401)', async () => {
       const passwordHash = await bcrypt.hash('CorrectPassword@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-1',
-          name: 'Ramesh Patel',
-          phone: '9876543210',
-          passwordHash,
-          role: Role.FARMER,
-          approvalStatus: ApprovalStatus.APPROVED,
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-farmer-1',
+        name: 'Ramesh Patel',
+        phone: '9876543210',
+        passwordHash,
+        role: Role.FARMER,
+        approvalStatus: ApprovalStatus.APPROVED,
       });
 
       await expect(
@@ -241,9 +231,7 @@ describe('AuthService (No CAPTCHA)', () => {
     });
 
     it('3. Unknown user = login rejected (401)', async () => {
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue(null),
-      });
+      mockUserRepository.findByIdentifier.mockResolvedValue(null);
 
       await expect(
         service.login({
@@ -255,16 +243,14 @@ describe('AuthService (No CAPTCHA)', () => {
 
     it('4. Pending user = login blocked with 403 Forbidden', async () => {
       const passwordHash = await bcrypt.hash('Farmer@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-pending',
-          name: 'Pending Farmer',
-          phone: '9876543210',
-          passwordHash,
-          role: Role.FARMER,
-          approvalStatus: ApprovalStatus.PENDING,
-          verificationStatus: VerificationStatus.PENDING,
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-farmer-pending',
+        name: 'Pending Farmer',
+        phone: '9876543210',
+        passwordHash,
+        role: Role.FARMER,
+        approvalStatus: ApprovalStatus.PENDING,
+        verificationStatus: VerificationStatus.PENDING,
       });
 
       await expect(
@@ -277,17 +263,15 @@ describe('AuthService (No CAPTCHA)', () => {
 
     it('5. Rejected user = login blocked with constructive rejection reason (403)', async () => {
       const passwordHash = await bcrypt.hash('Farmer@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-rejected',
-          name: 'Rejected Farmer',
-          phone: '9876543210',
-          passwordHash,
-          role: Role.FARMER,
-          approvalStatus: ApprovalStatus.REJECTED,
-          verificationStatus: VerificationStatus.REJECTED,
-          rejectionReason: 'Invalid APMC license and identity proof.',
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-farmer-rejected',
+        name: 'Rejected Farmer',
+        phone: '9876543210',
+        passwordHash,
+        role: Role.FARMER,
+        approvalStatus: ApprovalStatus.REJECTED,
+        verificationStatus: VerificationStatus.REJECTED,
+        rejectionReason: 'Invalid APMC license and identity proof.',
       });
 
       await expect(
@@ -300,16 +284,14 @@ describe('AuthService (No CAPTCHA)', () => {
 
     it('6. Approved Buyer login succeeds', async () => {
       const passwordHash = await bcrypt.hash('Buyer@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-buyer-1',
-          name: 'FreshCart Agro',
-          email: 'buyer@freshcart.com',
-          passwordHash,
-          role: Role.BUYER,
-          approvalStatus: ApprovalStatus.APPROVED,
-          verificationStatus: VerificationStatus.VERIFIED,
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-buyer-1',
+        name: 'FreshCart Agro',
+        email: 'buyer@freshcart.com',
+        passwordHash,
+        role: Role.BUYER,
+        approvalStatus: ApprovalStatus.APPROVED,
+        verificationStatus: VerificationStatus.VERIFIED,
       });
 
       const result = await service.login({
@@ -323,16 +305,14 @@ describe('AuthService (No CAPTCHA)', () => {
 
     it('7. Approved Admin login succeeds', async () => {
       const passwordHash = await bcrypt.hash('Admin@123', 10);
-      mockUserModel.findOne.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-admin-1',
-          name: 'Ministry Admin',
-          email: 'admin@vanijya.gov.in',
-          passwordHash,
-          role: Role.ADMIN,
-          approvalStatus: ApprovalStatus.APPROVED,
-          verificationStatus: VerificationStatus.VERIFIED,
-        }),
+      mockUserRepository.findByIdentifier.mockResolvedValue({
+        _id: 'usr-admin-1',
+        name: 'Ministry Admin',
+        email: 'admin@vanijya.gov.in',
+        passwordHash,
+        role: Role.ADMIN,
+        approvalStatus: ApprovalStatus.APPROVED,
+        verificationStatus: VerificationStatus.VERIFIED,
       });
 
       const result = await service.login({

@@ -6,8 +6,7 @@ export class AppService {
   constructor(private readonly databaseService: DatabaseService) {}
 
   getHealth() {
-    const isDbConnected =
-      this.databaseService.connection && this.databaseService.connection.readyState === 1;
+    const isDbConnected = this.databaseService.isHealthy();
 
     if (isDbConnected) {
       return {

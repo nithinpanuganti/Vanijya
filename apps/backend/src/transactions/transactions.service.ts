@@ -1,44 +1,33 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import {
-  Transaction,
-  TransactionDocument,
-  Payment,
-  PaymentDocument,
-  CropLot,
-  CropLotDocument,
-  Crop,
-  CropDocument,
-  User,
-  UserDocument,
-  Role,
-} from '../database/schemas';
+  TransactionRepository,
+  PaymentRepository,
+  LotRepository,
+  CropRepository,
+  UserRepository,
+} from '../repositories';
+import { Role } from '../database/enums';
 
 @Injectable()
 export class TransactionsService {
   private readonly logger = new Logger(TransactionsService.name);
 
   constructor(
-    @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
-    @InjectModel(Payment.name) private readonly paymentModel: Model<PaymentDocument>,
-    @InjectModel(CropLot.name) private readonly cropLotModel: Model<CropLotDocument>,
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly paymentRepository: PaymentRepository,
+    private readonly lotRepository: LotRepository,
+    private readonly cropRepository: CropRepository,
+    private readonly userRepository: UserRepository,
   ) {}
 
   async findAll(userId: string, role: Role) {
-    const filter: any = {};
-    if (role === Role.FARMER) filter.farmerId = userId;
-    if (role === Role.BUYER) filter.buyerId = userId;
-
-    const txns = await this.transactionModel.find(filter).sort({ createdAt: -1 }).lean();
+    const txns = await this.transactionRepository.findByUser(userId, role);
     if (!txns || txns.length === 0) return [];
 
-    const lots = await this.cropLotModel.find().lean();
-    const crops = await this.cropModel.find().lean();
-    const users = await this.userModel.find().lean();
-    const payments = await this.paymentModel.find().lean();
+    const lots = await this.lotRepository.findLots();
+    const crops = await this.cropRepository.findAll();
+    const users = await this.userRepository.findAll();
+    const payments = await this.paymentRepository.findAll();
 
     const lotMap = new Map(lots.map((l) => [l._id, l]));
     const cropMap = new Map(crops.map((c) => [c._id, c]));
@@ -79,7 +68,7 @@ export class TransactionsService {
   }
 
   async findOne(id: string, userId: string, role: Role) {
-    const transaction = await this.transactionModel.findById(id).lean();
+    const transaction = await this.transactionRepository.findById(id);
     if (!transaction) {
       throw new NotFoundException(`Transaction with ID ${id} not found.`);
     }
@@ -92,11 +81,11 @@ export class TransactionsService {
       throw new ForbiddenException('You are not authorized to view this transaction.');
     }
 
-    const lot = await this.cropLotModel.findById(transaction.lotId).lean();
-    const crop = lot ? await this.cropModel.findById(lot.cropId).lean() : null;
-    const buyer = await this.userModel.findById(transaction.buyerId).lean();
-    const farmer = await this.userModel.findById(transaction.farmerId).lean();
-    const payment = await this.paymentModel.findOne({ transactionId: transaction._id }).lean();
+    const lot = await this.lotRepository.findById(transaction.lotId);
+    const crop = lot ? await this.cropRepository.findById(lot.cropId) : null;
+    const buyer = await this.userRepository.findById(transaction.buyerId);
+    const farmer = await this.userRepository.findById(transaction.farmerId);
+    const payment = await this.paymentRepository.findByTransactionId(transaction._id);
 
     return {
       ...transaction,

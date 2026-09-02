@@ -1,38 +1,31 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Crop, CropDocument, MandiPrice, MandiPriceDocument } from '../database/schemas';
+import { CropRepository, MandiPriceRepository } from '../repositories';
 
 @Injectable()
 export class CropsService {
   private readonly logger = new Logger(CropsService.name);
 
   constructor(
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(MandiPrice.name) private readonly mandiPriceModel: Model<MandiPriceDocument>,
+    private readonly cropRepository: CropRepository,
+    private readonly mandiPriceRepository: MandiPriceRepository,
   ) {}
 
   async findAll() {
-    const crops = await this.cropModel.find().sort({ name: 1 }).lean();
+    const crops = await this.cropRepository.findAll();
     return crops.map((c) => ({ ...c, id: c._id }));
   }
 
   async findOne(id: string) {
-    const crop = await this.cropModel
-      .findOne({
-        $or: [{ _id: id }, { name: new RegExp(`^${id}$`, 'i') }],
-      })
-      .lean();
+    let crop = await this.cropRepository.findById(id);
+    if (!crop) {
+      crop = await this.cropRepository.findByName(id);
+    }
 
     if (!crop) {
       throw new NotFoundException(`Crop with ID ${id} not found.`);
     }
 
-    const prices = await this.mandiPriceModel
-      .find({ cropId: crop._id })
-      .sort({ date: -1 })
-      .limit(10)
-      .lean();
+    const prices = await this.mandiPriceRepository.findAll({ cropId: crop._id }, 10);
 
     return {
       ...crop,

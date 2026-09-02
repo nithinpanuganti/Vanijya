@@ -1,16 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import {
-  Payment,
-  PaymentDocument,
-  Transaction,
-  TransactionDocument,
-  PaymentStatus,
-  Role,
-  TransactionStatus,
-  NotificationType,
-} from '../database/schemas';
+import { PaymentRepository, TransactionRepository } from '../repositories';
+import { PaymentStatus, Role, TransactionStatus, NotificationType } from '../database/enums';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -19,18 +9,18 @@ export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
   constructor(
-    @InjectModel(Payment.name) private readonly paymentModel: Model<PaymentDocument>,
-    @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
+    private readonly paymentRepository: PaymentRepository,
+    private readonly transactionRepository: TransactionRepository,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   async getPaymentByTransaction(transactionId: string, userId: string, role: Role) {
-    const payment = await this.paymentModel.findOne({ transactionId }).lean();
+    const payment = await this.paymentRepository.findByTransactionId(transactionId);
     if (!payment) {
       throw new NotFoundException(`Payment record for transaction ${transactionId} not found.`);
     }
 
-    const txn = await this.transactionModel.findById(transactionId).lean();
+    const txn = await this.transactionRepository.findById(transactionId);
     if (role !== Role.ADMIN && txn?.buyerId !== userId && txn?.farmerId !== userId) {
       throw new ForbiddenException('You are not authorized to view this payment.');
     }
@@ -48,8 +38,8 @@ export class PaymentsService {
     role: Role,
     dto: UpdatePaymentStatusDto,
   ) {
-    const payment = await this.paymentModel.findOne({ transactionId }).lean();
-    const txn = await this.transactionModel.findById(transactionId).lean();
+    const payment = await this.paymentRepository.findByTransactionId(transactionId);
+    const txn = await this.transactionRepository.findById(transactionId);
 
     if (!payment || !txn) {
       throw new NotFoundException(`Payment record or transaction ${transactionId} not found.`);
@@ -63,24 +53,14 @@ export class PaymentsService {
       throw new BadRequestException('Settled payments cannot be reverted.');
     }
 
-    const updated = await this.paymentModel
-      .findByIdAndUpdate(
-        payment._id,
-        {
-          $set: {
-            status: dto.status,
-            paymentReference: dto.paymentReference || payment.paymentReference,
-            updatedAt: new Date(),
-          },
-        },
-        { new: true },
-      )
-      .lean();
+    const updated = await this.paymentRepository.updateByTransactionId(
+      transactionId,
+      dto.status,
+      dto.paymentReference || (dto as any).utrNumber,
+    );
 
     if (dto.status === PaymentStatus.PAID) {
-      await this.transactionModel.findByIdAndUpdate(transactionId, {
-        $set: { status: TransactionStatus.COMPLETED, updatedAt: new Date() },
-      });
+      await this.transactionRepository.updateStatus(transactionId, TransactionStatus.COMPLETED);
 
       await this.notificationsService.create({
         recipientId: txn.farmerId,

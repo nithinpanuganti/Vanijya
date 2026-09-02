@@ -9,8 +9,7 @@ describe('AppController', () => {
 
   beforeEach(async () => {
     mockDatabaseService = {
-      connection: { readyState: 1 },
-      isConnected: true,
+      isHealthy: jest.fn().mockReturnValue(true),
     };
 
     const app: TestingModule = await Test.createTestingModule({
@@ -43,7 +42,7 @@ describe('AppController', () => {
     });
 
     it('should return 503 degraded status when database is disconnected', () => {
-      mockDatabaseService.connection.readyState = 0;
+      mockDatabaseService.isHealthy.mockReturnValue(false);
       const mockRes: any = {
         status: jest.fn().mockReturnThis(),
         json: jest.fn().mockImplementation((data) => data),

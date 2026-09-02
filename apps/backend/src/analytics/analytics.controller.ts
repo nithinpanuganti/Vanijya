@@ -1,35 +1,25 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import {
-  User,
-  UserDocument,
-  CropLot,
-  CropLotDocument,
-  Bid,
-  BidDocument,
-  Transaction,
-  TransactionDocument,
-  Crop,
-  CropDocument,
-  Market,
-  MarketDocument,
-  Role,
-  CropLotStatus,
-  TransactionStatus,
-} from '../database/schemas';
+  UserRepository,
+  LotRepository,
+  BidRepository,
+  TransactionRepository,
+  CropRepository,
+  MarketRepository,
+} from '../repositories';
+import { Role, CropLotStatus, TransactionStatus } from '../database/enums';
 
 @ApiTags('Platform Analytics & Impact')
 @Controller('analytics')
 export class AnalyticsController {
   constructor(
-    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
-    @InjectModel(CropLot.name) private readonly cropLotModel: Model<CropLotDocument>,
-    @InjectModel(Bid.name) private readonly bidModel: Model<BidDocument>,
-    @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(Market.name) private readonly marketModel: Model<MarketDocument>,
+    private readonly userRepository: UserRepository,
+    private readonly lotRepository: LotRepository,
+    private readonly bidRepository: BidRepository,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly cropRepository: CropRepository,
+    private readonly marketRepository: MarketRepository,
   ) {}
 
   @Get('summary')
@@ -48,16 +38,23 @@ export class AnalyticsController {
     let marketsCount = 8;
 
     try {
-      [farmersCount, buyersCount, openLotsCount, allBids, cropsCount, marketsCount, completedTxns] =
-        await Promise.all([
-          this.userModel.countDocuments({ role: Role.FARMER }),
-          this.userModel.countDocuments({ role: Role.BUYER }),
-          this.cropLotModel.countDocuments({ status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] } }),
-          this.bidModel.countDocuments(),
-          this.cropModel.countDocuments(),
-          this.marketModel.countDocuments(),
-          this.transactionModel.find({ status: TransactionStatus.COMPLETED }).lean(),
-        ]);
+      const [fCount, bCount, lots, bids, crops, markets, txns] = await Promise.all([
+        this.userRepository.countByRole(Role.FARMER),
+        this.userRepository.countByRole(Role.BUYER),
+        this.lotRepository.findLots({ status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] } } as any),
+        this.bidRepository.findAll(),
+        this.cropRepository.findAll(),
+        this.marketRepository.findAll(),
+        this.transactionRepository.findAll({ status: TransactionStatus.COMPLETED } as any),
+      ]);
+
+      farmersCount = fCount;
+      buyersCount = bCount;
+      openLotsCount = lots.length;
+      allBids = bids.length;
+      cropsCount = crops.length;
+      marketsCount = markets.length;
+      completedTxns = txns;
     } catch {
       // Use fallback defaults
     }

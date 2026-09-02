@@ -1,22 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
 import { AdminService } from './admin.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
-  User,
-  CropLot,
-  Crop,
-  Bid,
-  Transaction,
-  Payment,
-  AuditLog,
+  UserRepository,
+  LotRepository,
+  CropRepository,
+  BidRepository,
+  TransactionRepository,
+  PaymentRepository,
+  AuditRepository,
+} from '../repositories';
+import {
   Role,
   ApprovalStatus,
   VerificationStatus,
   AuditAction,
   NotificationType,
-} from '../database/schemas';
+} from '../database/enums';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('AdminService (Registration Verification Workflow)', () => {
@@ -24,82 +25,53 @@ describe('AdminService (Registration Verification Workflow)', () => {
   let auditService: AuditService;
   let notificationsService: NotificationsService;
 
-  const mockUserModel = {
-    countDocuments: jest.fn().mockResolvedValue(2),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
+  const mockUserRepository = {
+    countByRole: jest.fn().mockResolvedValue(2),
+    findAll: jest.fn().mockResolvedValue([]),
+    findById: jest.fn().mockResolvedValue({
+      _id: 'usr-farmer-new',
+      name: 'New Farmer',
+      role: Role.FARMER,
+      approvalStatus: ApprovalStatus.PENDING,
     }),
-    findById: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({
-        _id: 'usr-farmer-new',
-        name: 'New Farmer',
-        role: Role.FARMER,
-        approvalStatus: ApprovalStatus.PENDING,
-      }),
-    }),
-    findByIdAndUpdate: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({
-        _id: 'usr-farmer-new',
-        id: 'usr-farmer-new',
-        name: 'New Farmer',
-        role: Role.FARMER,
-        approvalStatus: ApprovalStatus.APPROVED,
-        verificationStatus: VerificationStatus.VERIFIED,
-        isVerified: true,
-      }),
+    updateApprovalStatus: jest.fn().mockResolvedValue({
+      _id: 'usr-farmer-new',
+      id: 'usr-farmer-new',
+      name: 'New Farmer',
+      role: Role.FARMER,
+      approvalStatus: ApprovalStatus.APPROVED,
+      verificationStatus: VerificationStatus.VERIFIED,
+      isVerified: true,
     }),
   };
 
-  const mockCropLotModel = {
-    countDocuments: jest.fn().mockResolvedValue(0),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockLotRepository = {
+    countByStatus: jest.fn().mockResolvedValue(0),
+    findLots: jest.fn().mockResolvedValue([]),
+    findFarmerLots: jest.fn().mockResolvedValue([]),
   };
 
-  const mockBidModel = {
-    countDocuments: jest.fn().mockResolvedValue(0),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockCropRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockTransactionModel = {
-    find: jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockBidRepository = {
+    countByStatus: jest.fn().mockResolvedValue(0),
+    findAll: jest.fn().mockResolvedValue([]),
+    findByBuyer: jest.fn().mockResolvedValue([]),
   };
 
-  const mockPaymentModel = {
-    find: jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockTransactionRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockAuditLogModel = {
-    countDocuments: jest.fn().mockResolvedValue(0),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnValue({
-          lean: jest.fn().mockResolvedValue([]),
-        }),
-      }),
-    }),
+  const mockPaymentRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
+  };
+
+  const mockAuditRepository = {
+    findByActor: jest.fn().mockResolvedValue([]),
+    findRecentActivity: jest.fn().mockResolvedValue([]),
   };
 
   const mockAuditService = {
@@ -115,18 +87,13 @@ describe('AdminService (Registration Verification Workflow)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminService,
-        { provide: getModelToken(User.name), useValue: mockUserModel },
-        { provide: getModelToken(CropLot.name), useValue: mockCropLotModel },
-        {
-          provide: getModelToken(Crop.name),
-          useValue: {
-            find: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
-          },
-        },
-        { provide: getModelToken(Bid.name), useValue: mockBidModel },
-        { provide: getModelToken(Transaction.name), useValue: mockTransactionModel },
-        { provide: getModelToken(Payment.name), useValue: mockPaymentModel },
-        { provide: getModelToken(AuditLog.name), useValue: mockAuditLogModel },
+        { provide: UserRepository, useValue: mockUserRepository },
+        { provide: LotRepository, useValue: mockLotRepository },
+        { provide: CropRepository, useValue: mockCropRepository },
+        { provide: BidRepository, useValue: mockBidRepository },
+        { provide: TransactionRepository, useValue: mockTransactionRepository },
+        { provide: PaymentRepository, useValue: mockPaymentRepository },
+        { provide: AuditRepository, useValue: mockAuditRepository },
         { provide: AuditService, useValue: mockAuditService },
         { provide: NotificationsService, useValue: mockNotificationsService },
       ],
@@ -143,23 +110,17 @@ describe('AdminService (Registration Verification Workflow)', () => {
 
   describe('approveUser', () => {
     it('should approve a pending user, update verificationStatus to VERIFIED, log audit, and notify user', async () => {
-      mockUserModel.findById.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-new',
-          name: 'New Farmer',
-          role: Role.FARMER,
-        }),
+      mockUserRepository.findById.mockResolvedValueOnce({
+        _id: 'usr-farmer-new',
+        name: 'New Farmer',
+        role: Role.FARMER,
       });
-      mockUserModel.findByIdAndUpdate.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-farmer-new',
-          id: 'usr-farmer-new',
-          name: 'New Farmer',
-          role: Role.FARMER,
-          approvalStatus: ApprovalStatus.APPROVED,
-          verificationStatus: VerificationStatus.VERIFIED,
-          isVerified: true,
-        }),
+      mockUserRepository.updateApprovalStatus.mockResolvedValueOnce({
+        _id: 'usr-farmer-new',
+        name: 'New Farmer',
+        role: Role.FARMER,
+        approvalStatus: ApprovalStatus.APPROVED,
+        verificationStatus: VerificationStatus.VERIFIED,
       });
 
       const result = await service.approveUser('usr-farmer-new', 'admin-id-1');
@@ -177,9 +138,7 @@ describe('AdminService (Registration Verification Workflow)', () => {
     });
 
     it('should throw NotFoundException if applicant does not exist', async () => {
-      mockUserModel.findById.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue(null),
-      });
+      mockUserRepository.findById.mockResolvedValueOnce(null);
 
       await expect(service.approveUser('non-existent-id', 'admin-1')).rejects.toThrow(
         NotFoundException,
@@ -189,24 +148,18 @@ describe('AdminService (Registration Verification Workflow)', () => {
 
   describe('rejectUser', () => {
     it('should reject applicant with reason, update status to REJECTED, log audit, and notify user', async () => {
-      mockUserModel.findById.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-buyer-new',
-          name: 'Bad Buyer',
-          role: Role.BUYER,
-        }),
+      mockUserRepository.findById.mockResolvedValueOnce({
+        _id: 'usr-buyer-new',
+        name: 'Bad Buyer',
+        role: Role.BUYER,
       });
-      mockUserModel.findByIdAndUpdate.mockReturnValueOnce({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'usr-buyer-new',
-          id: 'usr-buyer-new',
-          name: 'Bad Buyer',
-          role: Role.BUYER,
-          approvalStatus: ApprovalStatus.REJECTED,
-          verificationStatus: VerificationStatus.REJECTED,
-          isVerified: false,
-          rejectionReason: 'Invalid APMC license and duplicate mobile number.',
-        }),
+      mockUserRepository.updateApprovalStatus.mockResolvedValueOnce({
+        _id: 'usr-buyer-new',
+        name: 'Bad Buyer',
+        role: Role.BUYER,
+        approvalStatus: ApprovalStatus.REJECTED,
+        verificationStatus: VerificationStatus.REJECTED,
+        rejectionReason: 'Invalid APMC license and duplicate mobile number.',
       });
 
       const result = await service.rejectUser(

@@ -1,7 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { MandiPrice, MandiPriceDocument, Crop, CropDocument, Market, MarketDocument } from '../database/schemas';
+import { MandiPriceRepository, CropRepository, MarketRepository } from '../repositories';
 import {
   PriceQueryDto,
   PriceTrendsQueryDto,
@@ -23,9 +21,9 @@ export class PricesService {
   private readonly logger = new Logger(PricesService.name);
 
   constructor(
-    @InjectModel(MandiPrice.name) private readonly mandiPriceModel: Model<MandiPriceDocument>,
-    @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
-    @InjectModel(Market.name) private readonly marketModel: Model<MarketDocument>,
+    private readonly mandiPriceRepository: MandiPriceRepository,
+    private readonly cropRepository: CropRepository,
+    private readonly marketRepository: MarketRepository,
     @Inject(MARKET_DATA_PROVIDER_TOKEN)
     private readonly marketDataProvider: MarketDataProvider,
     private readonly analyticsService: PriceAnalyticsService,
@@ -42,15 +40,11 @@ export class PricesService {
       if (query.cropId) filter.cropId = query.cropId;
       if (query.marketId) filter.marketId = query.marketId;
 
-      const dbPrices = await this.mandiPriceModel
-        .find(filter)
-        .sort({ date: -1 })
-        .limit(50)
-        .lean();
+      const dbPrices = await this.mandiPriceRepository.findAll(filter, 50);
 
       if (dbPrices && dbPrices.length > 0) {
-        const crops = await this.cropModel.find().lean();
-        const markets = await this.marketModel.find().lean();
+        const crops = await this.cropRepository.findAll();
+        const markets = await this.marketRepository.findAll();
         const cropMap = new Map(crops.map((c) => [c._id, c]));
         const marketMap = new Map(markets.map((m) => [m._id, m]));
 
@@ -73,7 +67,7 @@ export class PricesService {
             modalPrice: p.modalPrice,
             arrivalQuantity: p.arrivalQuantity,
             unit: 'QUINTAL',
-            date: new Date(p.date).toISOString().split('T')[0],
+            date: new Date(p.priceDate || (p as any).date || Date.now()).toISOString().split('T')[0],
             source: p.source as any,
             updatedAt: new Date(p.createdAt || Date.now()).toISOString(),
           };

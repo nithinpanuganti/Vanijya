@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
-import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
-import { GridFSBucket, ObjectId } from 'mongodb';
+import { DatabaseService } from '../database/database.service';
+import { COLLECTIONS } from '../database/database.constants';
+import { ObjectId } from 'mongodb';
 import { Readable } from 'stream';
 
 export interface StoredPhotoResult {
@@ -15,33 +15,9 @@ export interface StoredPhotoResult {
 @Injectable()
 export class PhotoStorageService {
   private readonly logger = new Logger(PhotoStorageService.name);
-  private gridFSBucket: GridFSBucket | null = null;
-  // In-memory buffer fallback for environments without active MongoDB replica/GridFS
   private inMemoryPhotos = new Map<string, { buffer: Buffer; mimeType: string; filename: string }>();
 
-  constructor(@InjectConnection() private readonly connection: Connection) {
-    this.initBucket();
-  }
-
-  private initBucket() {
-    try {
-      if (this.connection && this.connection.db) {
-        this.gridFSBucket = new GridFSBucket(this.connection.db as any, {
-          bucketName: 'profile_photos',
-        });
-        this.logger.log('📦 GridFS Bucket [profile_photos] initialized successfully.');
-      }
-    } catch (err: any) {
-      this.logger.warn(`GridFS initialization warning: ${err.message}. Fallback cache will be used if disconnected.`);
-    }
-  }
-
-  private getBucket(): GridFSBucket | null {
-    if (!this.gridFSBucket && this.connection && this.connection.db) {
-      this.initBucket();
-    }
-    return this.gridFSBucket;
-  }
+  constructor(private readonly databaseService: DatabaseService) {}
 
   async storeProfilePhoto(
     fileBuffer: Buffer,
@@ -60,11 +36,11 @@ export class PhotoStorageService {
       throw new BadRequestException('Photo size exceeds 5MB limit.');
     }
 
-    const bucket = this.getBucket();
     const cleanFilename = `profile_${Date.now()}_${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
-    if (bucket) {
-      try {
+    try {
+      const bucket = this.databaseService.getGridFSBucket();
+      if (bucket) {
         return await new Promise<StoredPhotoResult>((resolve, reject) => {
           const uploadStream = bucket.openUploadStream(cleanFilename, {
             contentType: mimeType,
@@ -79,7 +55,6 @@ export class PhotoStorageService {
             .pipe(uploadStream)
             .on('error', (err) => {
               this.logger.error(`GridFS upload error: ${err.message}`);
-              // Store in in-memory map as resilience fallback
               const fallbackId = `photo-${Date.now()}`;
               this.inMemoryPhotos.set(fallbackId, { buffer: fileBuffer, mimeType, filename: cleanFilename });
               resolve({
@@ -92,7 +67,6 @@ export class PhotoStorageService {
             })
             .on('finish', () => {
               const fileId = uploadStream.id.toString();
-              // Also keep in local cache for ultra-fast serving
               this.inMemoryPhotos.set(fileId, { buffer: fileBuffer, mimeType, filename: cleanFilename });
               resolve({
                 fileId,
@@ -103,12 +77,11 @@ export class PhotoStorageService {
               });
             });
         });
-      } catch (err: any) {
-        this.logger.warn(`GridFS storage failed, using memory cache: ${err.message}`);
       }
+    } catch (err: any) {
+      this.logger.warn(`GridFS storage note: ${err.message}`);
     }
 
-    // Resilient fallback storage
     const fallbackId = `photo-${Date.now()}`;
     this.inMemoryPhotos.set(fallbackId, { buffer: fileBuffer, mimeType, filename: cleanFilename });
     return {
@@ -123,7 +96,6 @@ export class PhotoStorageService {
   async getPhotoStream(
     fileId: string,
   ): Promise<{ stream: NodeJS.ReadableStream; mimeType: string }> {
-    // Check in-memory cache first
     if (this.inMemoryPhotos.has(fileId)) {
       const item = this.inMemoryPhotos.get(fileId)!;
       const stream = new Readable();
@@ -132,30 +104,26 @@ export class PhotoStorageService {
       return { stream, mimeType: item.mimeType };
     }
 
-    const bucket = this.getBucket();
-    if (bucket && ObjectId.isValid(fileId)) {
+    if (ObjectId.isValid(fileId)) {
       try {
+        const bucket = this.databaseService.getGridFSBucket();
         const objId = new ObjectId(fileId);
-        const files = await this.connection.db
-          ?.collection('profile_photos.files')
-          .find({ _id: objId })
-          .toArray();
+        const filesCol = this.databaseService.getCollection(COLLECTIONS.PROFILE_PHOTOS_FILES);
+        const fileDoc = await filesCol.findOne({ _id: objId });
 
-        if (files && files.length > 0) {
-          const fileDoc = files[0];
-          const mimeType = fileDoc.contentType || 'image/jpeg';
+        if (fileDoc) {
+          const mimeType = (fileDoc as any).contentType || 'image/jpeg';
           const downloadStream = bucket.openDownloadStream(objId);
           return { stream: downloadStream, mimeType };
         }
       } catch (err: any) {
-        this.logger.warn(`GridFS download failed for ${fileId}: ${err.message}`);
+        this.logger.warn(`GridFS download note for ${fileId}: ${err.message}`);
       }
     }
 
     throw new NotFoundException('Profile photo not found.');
   }
 
-  // Pre-seed demo placeholder photo
   seedDemoPhoto(id: string, base64Svg: string, mimeType = 'image/svg+xml') {
     const buffer = Buffer.from(base64Svg, 'utf-8');
     this.inMemoryPhotos.set(id, { buffer, mimeType, filename: `demo_${id}.svg` });

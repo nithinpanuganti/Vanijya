@@ -1,37 +1,30 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
 import { PricesService } from './prices.service';
 import { PriceAnalyticsService } from './services/price-analytics.service';
 import { PriceCacheService } from './services/price-cache.service';
 import { MockMarketDataProvider } from './providers/mock-market-data.provider';
 import { MARKET_DATA_PROVIDER_TOKEN } from './providers/market-data.constants';
-import { MandiPrice, Crop, Market } from '../database/schemas';
+import { MandiPriceRepository, CropRepository, MarketRepository } from '../repositories';
 
 describe('PricesService & Market Intelligence', () => {
   let service: PricesService;
   let mockProvider: MockMarketDataProvider;
   let analyticsService: PriceAnalyticsService;
 
-  const mockMandiPriceModel = {
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnValue({
-          lean: jest.fn().mockResolvedValue([]),
-        }),
-      }),
-    }),
+  const mockMandiPriceRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
+    findLatestPrice: jest.fn().mockResolvedValue(null),
+    findHistory: jest.fn().mockResolvedValue([]),
   };
 
-  const mockCropModel = {
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockCropRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
+    findByName: jest.fn().mockResolvedValue(null),
   };
 
-  const mockMarketModel = {
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockMarketRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
+    findNearby: jest.fn().mockResolvedValue([]),
   };
 
   beforeEach(async () => {
@@ -45,9 +38,9 @@ describe('PricesService & Market Intelligence', () => {
           provide: MARKET_DATA_PROVIDER_TOKEN,
           useClass: MockMarketDataProvider,
         },
-        { provide: getModelToken(MandiPrice.name), useValue: mockMandiPriceModel },
-        { provide: getModelToken(Crop.name), useValue: mockCropModel },
-        { provide: getModelToken(Market.name), useValue: mockMarketModel },
+        { provide: MandiPriceRepository, useValue: mockMandiPriceRepository },
+        { provide: CropRepository, useValue: mockCropRepository },
+        { provide: MarketRepository, useValue: mockMarketRepository },
       ],
     }).compile();
 

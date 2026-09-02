@@ -1,79 +1,56 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
 import { LotsService } from './lots.service';
 import { AuditService } from '../audit/audit.service';
 import { UsersService } from '../users/users.service';
 import {
-  CropLot,
-  Crop,
-  User,
-  Bid,
-  Transaction,
-  Payment,
+  LotRepository,
+  CropRepository,
+  UserRepository,
+  BidRepository,
+  TransactionRepository,
+  PaymentRepository,
+} from '../repositories';
+import {
   CropLotStatus,
   QualityGrade,
   Role,
-} from '../database/schemas';
+} from '../database/enums';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
 describe('LotsService', () => {
   let service: LotsService;
 
-  const mockCropLotModel = {
+  const mockLotRepository = {
     create: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+    findLots: jest.fn().mockResolvedValue([]),
     findById: jest.fn(),
-    findByIdAndUpdate: jest.fn(),
+    update: jest.fn(),
+    updateStatus: jest.fn(),
   };
 
-  const mockCropModel = {
-    findById: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({ _id: 'crop-1', name: 'Tomato' }),
-    }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockCropRepository = {
+    findById: jest.fn().mockResolvedValue({ _id: 'crop-1', name: 'Tomato' }),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockUserModel = {
-    findById: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue({ _id: 'farmer-1', name: 'Ramesh' }),
-    }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockUserRepository = {
+    findById: jest.fn().mockResolvedValue({ _id: 'farmer-1', name: 'Ramesh' }),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockBidModel = {
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([]),
-      }),
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockBidRepository = {
+    findAll: jest.fn().mockResolvedValue([]),
+    findByLot: jest.fn().mockResolvedValue([]),
   };
 
-  const mockTransactionModel = {
-    findOne: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue(null),
-    }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockTransactionRepository = {
+    findByLotId: jest.fn().mockResolvedValue(null),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
-  const mockPaymentModel = {
-    findOne: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue(null),
-    }),
-    find: jest.fn().mockReturnValue({
-      lean: jest.fn().mockResolvedValue([]),
-    }),
+  const mockPaymentRepository = {
+    findByTransactionId: jest.fn().mockResolvedValue(null),
+    findAll: jest.fn().mockResolvedValue([]),
   };
 
   const mockAuditService = {
@@ -98,12 +75,12 @@ describe('LotsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LotsService,
-        { provide: getModelToken(CropLot.name), useValue: mockCropLotModel },
-        { provide: getModelToken(Crop.name), useValue: mockCropModel },
-        { provide: getModelToken(User.name), useValue: mockUserModel },
-        { provide: getModelToken(Bid.name), useValue: mockBidModel },
-        { provide: getModelToken(Transaction.name), useValue: mockTransactionModel },
-        { provide: getModelToken(Payment.name), useValue: mockPaymentModel },
+        { provide: LotRepository, useValue: mockLotRepository },
+        { provide: CropRepository, useValue: mockCropRepository },
+        { provide: UserRepository, useValue: mockUserRepository },
+        { provide: BidRepository, useValue: mockBidRepository },
+        { provide: TransactionRepository, useValue: mockTransactionRepository },
+        { provide: PaymentRepository, useValue: mockPaymentRepository },
         { provide: AuditService, useValue: mockAuditService },
         { provide: UsersService, useValue: mockUsersService },
       ],
@@ -118,25 +95,17 @@ describe('LotsService', () => {
 
   describe('create', () => {
     it('should create a crop lot for authenticated farmer', async () => {
-      mockCropModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({ _id: 'crop-tomato', name: 'Tomato' }),
-      });
-      mockCropLotModel.create.mockResolvedValue({
-        toObject: () => ({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          cropId: 'crop-tomato',
-          quantity: 50,
-          unit: 'QUINTAL',
-          expectedPrice: 2200,
-          qualityGrade: QualityGrade.GRADE_A,
-          location: 'Pimpalgaon, Nashik',
-          status: CropLotStatus.OPEN,
-        }),
+      mockCropRepository.findById.mockResolvedValue({ _id: 'crop-tomato', name: 'Tomato' });
+      mockLotRepository.create.mockResolvedValue({
         _id: 'lot-1',
-        expectedPrice: 2200,
+        farmerId: 'farmer-1',
+        cropId: 'crop-tomato',
         quantity: 50,
+        unit: 'QUINTAL',
+        expectedPrice: 2200,
+        qualityGrade: QualityGrade.GRADE_A,
         location: 'Pimpalgaon, Nashik',
+        status: CropLotStatus.OPEN,
       });
 
       const result = await service.create('farmer-1', {
@@ -179,12 +148,10 @@ describe('LotsService', () => {
 
   describe('update', () => {
     it('should reject update if user is not the owner farmer', async () => {
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.OPEN,
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.OPEN,
       });
 
       await expect(
@@ -193,12 +160,10 @@ describe('LotsService', () => {
     });
 
     it('should reject update if lot is already SOLD', async () => {
-      mockCropLotModel.findById.mockReturnValue({
-        lean: jest.fn().mockResolvedValue({
-          _id: 'lot-1',
-          farmerId: 'farmer-1',
-          status: CropLotStatus.SOLD,
-        }),
+      mockLotRepository.findById.mockResolvedValue({
+        _id: 'lot-1',
+        farmerId: 'farmer-1',
+        status: CropLotStatus.SOLD,
       });
 
       await expect(

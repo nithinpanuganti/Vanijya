@@ -1,30 +1,24 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
 import { NotificationsService } from './notifications.service';
-import { Notification, NotificationType } from '../database/schemas';
+import { NotificationRepository } from '../repositories/notification.repository';
+import { NotificationType } from '../database/enums';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
 
-  const mockNotificationModel = {
+  const mockNotificationRepository = {
     create: jest.fn(),
-    find: jest.fn().mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnValue({
-          lean: jest.fn().mockResolvedValue([]),
-        }),
-      }),
-    }),
-    countDocuments: jest.fn(),
-    updateOne: jest.fn(),
-    updateMany: jest.fn(),
+    findByRecipient: jest.fn().mockResolvedValue([]),
+    countUnread: jest.fn(),
+    markRead: jest.fn(),
+    markAllRead: jest.fn(),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsService,
-        { provide: getModelToken(Notification.name), useValue: mockNotificationModel },
+        { provide: NotificationRepository, useValue: mockNotificationRepository },
       ],
     }).compile();
 
@@ -36,16 +30,15 @@ describe('NotificationsService', () => {
   });
 
   it('should create notification in MongoDB when connected', async () => {
-    mockNotificationModel.create.mockResolvedValue({
-      toObject: () => ({
-        _id: 'notif-101',
-        recipientId: 'usr-farmer-1',
-        type: NotificationType.BID_RECEIVED,
-        title: 'New Bid Received',
-        message: 'New bid placed',
-        isRead: false,
-      }),
+    mockNotificationRepository.create.mockResolvedValue({
       _id: 'notif-101',
+      recipientId: 'usr-farmer-1',
+      type: NotificationType.BID_RECEIVED,
+      title: 'New Bid Received',
+      message: 'New bid placed',
+      isRead: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     const result = await service.create({
@@ -56,17 +49,17 @@ describe('NotificationsService', () => {
     });
 
     expect(result.id).toBe('notif-101');
-    expect(mockNotificationModel.create).toHaveBeenCalled();
+    expect(mockNotificationRepository.create).toHaveBeenCalled();
   });
 
   it('should return unread count for user', async () => {
-    mockNotificationModel.countDocuments.mockResolvedValue(3);
+    mockNotificationRepository.countUnread.mockResolvedValue(3);
     const count = await service.getUnreadCount('usr-farmer-1');
     expect(count).toBe(3);
   });
 
   it('should mark all notifications as read', async () => {
-    mockNotificationModel.updateMany.mockResolvedValue({ modifiedCount: 4 });
+    mockNotificationRepository.markAllRead.mockResolvedValue(4);
     const result = await service.markAllAsRead('usr-farmer-1');
     expect(result.count).toBe(4);
   });
