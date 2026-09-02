@@ -25,15 +25,6 @@ import {
   AuditLogSchema,
 } from './schemas';
 
-export function sanitizeMongoUri(uri?: string): string {
-  if (!uri) return '<missing>';
-  try {
-    return uri.replace(/(mongodb(?:\+srv)?:\/\/)([^:]+):([^@]+)@/i, '$1***:***@');
-  } catch {
-    return '***';
-  }
-}
-
 @Global()
 @Module({
   imports: [
@@ -50,8 +41,8 @@ export function sanitizeMongoUri(uri?: string): string {
           throw new Error(errorMsg);
         }
 
-        const sanitized = sanitizeMongoUri(uri);
-        Logger.log(`🍃 Connecting to MongoDB at: ${sanitized}`, 'DatabaseModule');
+        // Log safe message without revealing URI or credentials
+        Logger.log('🍃 Connecting to MongoDB...', 'DatabaseModule');
 
         return {
           uri,
@@ -61,11 +52,11 @@ export function sanitizeMongoUri(uri?: string): string {
           retryDelay: 1000,
           connectionFactory: (connection) => {
             connection.on('connected', () => {
-              Logger.log(`🍃 MongoDB connected successfully (${sanitized})`, 'DatabaseModule');
+              Logger.log('🍃 MongoDB connected successfully.', 'DatabaseModule');
             });
             connection.on('error', (err: any) => {
               Logger.error(
-                `❌ MongoDB connection failed: ${err.message || err}. Ensure your MongoDB service is running and accessible at ${sanitized}.`,
+                `❌ MongoDB connection failed: ${err.message || err}. Ensure your MongoDB service is running and your connection string in apps/backend/.env is valid.`,
                 'DatabaseModule',
               );
             });

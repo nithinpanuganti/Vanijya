@@ -27,6 +27,9 @@ coverage/
 .parcel-cache/
 .vite/
 
+# Database Persistence Files
+.mongo-data/
+
 # Environment Variables & Secrets (Keep .env.example)
 .env
 .env.local

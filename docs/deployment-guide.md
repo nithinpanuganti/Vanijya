@@ -1,58 +1,95 @@
-# Vanijya (वाणिज्य) — Production Deployment & Cloud Guide
+# Vanijya (वाणिज्य) — Production Deployment & Database Configuration Guide
 **SIH Problem Statement 26132 — Strengthening Market Linkages & Price Discovery for Farmers**
 
 ---
 
-## 1. Cloud Deployment Architectures
+## 1. MongoDB Database Setup Options
 
-### Option A: Cloud Platform Deployment (Render / Railway / Vercel)
-Recommended for agile cloud staging and production environments.
+Vanijya uses **MongoDB** as its single, persistent source of truth with Mongoose schemas, GeoJSON 2dsphere spatial indexing, and GridFS binary streaming for verification photos.
 
-1. **Database Setup (Neon / Supabase / Managed PostgreSQL):**
-   - Create a PostgreSQL database instance.
-   - Copy the PostgreSQL connection string `DATABASE_URL`.
-
-2. **Backend API Service (Render / Railway / AWS EC2):**
-   - Set Build Command:
+### Option A: Local MongoDB (Development / Local Server)
+1. **Install MongoDB Community Server**:
+   - **Windows**: `winget install MongoDB.Server` or download from [mongodb.com](https://www.mongodb.com/try/download/community)
+   - **Ubuntu / Debian**:
      ```bash
-     npm install && npm run build:packages && npx prisma generate --schema=apps/backend/prisma/schema.prisma && npm run build:backend
+     sudo apt-get install gnupg curl
+     curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+     echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+     sudo apt-get update
+     sudo apt-get install -y mongodb-org
+     sudo systemctl start mongod
+     sudo systemctl enable mongod
      ```
-   - Set Start Command:
-     ```bash
-     node apps/backend/dist/main.js
-     ```
-   - Set Environment Variables:
-     - `DATABASE_URL`: Your production PostgreSQL connection string
-     - `JWT_SECRET`: Secure random signing key
-     - `PORT`: `4000` (or platform default)
-     - `NODE_ENV`: `production`
-
-3. **Frontend Unified Portal (Vercel / AWS Amplify):**
-   - Root Directory: `apps/web` (or Monorepo Root)
-   - Framework Preset: `Next.js`
-   - Build Command: `npm run build`
-   - Set Environment Variables:
-     - `NEXT_PUBLIC_API_URL`: URL of your deployed Backend API (e.g. `https://api.vanijya.app/api`)
+2. **Configure Environment Variable**:
+   In `apps/backend/.env`:
+   ```env
+   MONGODB_URI=mongodb://127.0.0.1:27017/vanijya
+   ```
 
 ---
 
-### Option B: Linux Server Deployment (Ubuntu / AWS EC2)
-1. **System Preparation:**
-   - Install Node.js 20+ LTS, npm, and PostgreSQL.
-   - Configure PostgreSQL database `vanijya_db` and user permissions.
+### Option B: MongoDB Atlas (Managed Cloud Cluster)
+1. **Create an Atlas Cluster**:
+   - Create a free account at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
+   - Create a shared cluster (e.g., M0 Free Tier).
+   - Under **Database Access**, create a database user with read/write privileges.
+   - Under **Network Access**, whitelist your deployment server IP (or `0.0.0.0/0` for cloud PaaS platforms).
+2. **Obtain Connection String**:
+   - Click **Connect** &rarr; **Drivers** (Node.js).
+   - Copy the SRV connection URI.
+3. **Configure Environment Variable**:
+   In `apps/backend/.env`:
+   ```env
+   MONGODB_URI=mongodb+srv://<username>:<password>@<cluster-name>.mongodb.net/vanijya?retryWrites=true&w=majority
+   ```
 
-2. **Clone & Build:**
+---
+
+## 2. Cloud Platform Deployment (Render / Railway / AWS / Vercel)
+
+### Backend API Service (Render / Railway / AWS EC2):
+- **Build Command**:
+  ```bash
+  npm install && npm run build:backend
+  ```
+- **Start Command**:
+  ```bash
+  node apps/backend/dist/main.js
+  ```
+- **Environment Variables**:
+  - `MONGODB_URI`: `mongodb+srv://<username>:<password>@<cluster-name>.mongodb.net/vanijya?retryWrites=true&w=majority`
+  - `JWT_SECRET`: `vanijya_super_secret_jwt_key_sih2026_national_trade`
+  - `JWT_EXPIRES_IN`: `7d`
+  - `PORT`: `4000` (or dynamic platform port)
+  - `NODE_ENV`: `production`
+
+### Frontend Unified Web Portal (Vercel / AWS Amplify):
+- **Root Directory**: Monorepo Root (or `apps/web`)
+- **Framework Preset**: `Next.js`
+- **Build Command**: `npm run build:web`
+- **Start Command**: `npm run start --workspace=apps/web`
+- **Environment Variables**:
+  - `NEXT_PUBLIC_API_URL`: URL of your deployed Backend API (e.g. `https://api.vanijya.gov.in/api`)
+
+---
+
+## 3. Self-Hosted Linux Server Deployment (Ubuntu / PM2)
+
+1. **System Preparation & Build**:
    ```bash
    git clone https://github.com/nithinpanuganti/Vanijya.git
    cd Vanijya
    npm install
-   npm run build:packages
-   npx prisma generate --schema=apps/backend/prisma/schema.prisma
-   npx prisma db push --schema=apps/backend/prisma/schema.prisma
    npm run build
    ```
 
-3. **Process Management with PM2:**
+2. **Configure Environment**:
+   ```bash
+   cp apps/backend/.env.example apps/backend/.env
+   nano apps/backend/.env
+   ```
+
+3. **Process Management with PM2**:
    ```bash
    # Install PM2 globally
    npm install -g pm2
@@ -62,20 +99,52 @@ Recommended for agile cloud staging and production environments.
 
    # Start Web Portal
    pm2 start npm --name "vanijya-web" -- run start --workspace=apps/web
+
+   # Save PM2 process list across reboots
+   pm2 save
+   pm2 startup
    ```
 
 ---
 
-## 2. Environment Variables Reference
+## 4. Environment Variables Reference
 
-| Variable | Service | Template Default | Description |
-| :--- | :--- | :--- | :--- |
-| `DATABASE_URL` | Backend | `postgresql://user:pass@localhost:5432/vanijya_db?schema=public` | PostgreSQL Connection String |
-| `JWT_SECRET` | Backend | `vanijya_super_secret_jwt_key_sih2024` | Cryptographic JWT signing secret |
-| `JWT_EXPIRES_IN`| Backend | `7d` | Session expiration window |
-| `PORT` | Backend | `4000` | HTTP listening port |
-| `MARKET_DATA_PROVIDER`| Backend | `mock` (or `government`) | Price adapter mode |
-| `GOV_MARKET_API_KEY` | Backend | `""` | Optional data.gov.in Agmarknet API key |
-| `PRICE_CACHE_TTL_MS` | Backend | `300000` | In-memory price cache TTL (5 minutes) |
-| `NEXT_PUBLIC_API_URL`| Web | `http://localhost:4000/api` | Backend API endpoint |
-| `PORT` | Web | `3000` | Web portal port |
+| Variable | Service | Required | Description | Example |
+| :--- | :--- | :--- | :--- | :--- |
+| `MONGODB_URI` | Backend | **Yes** | MongoDB Connection URI (Local or Atlas) | `mongodb://127.0.0.1:27017/vanijya` or `mongodb+srv://...` |
+| `JWT_SECRET` | Backend | **Yes** | Cryptographic JWT signing secret | `vanijya_super_secret_jwt_key_sih2026` |
+| `JWT_EXPIRES_IN` | Backend | No | Session expiration window (Default: `7d`) | `7d` |
+| `PORT` | Backend | No | Backend HTTP listening port (Default: `4000`) | `4000` |
+| `NODE_ENV` | Backend | No | Execution environment | `production` / `development` |
+| `NEXT_PUBLIC_API_URL` | Web | **Yes** | Public Backend API base endpoint | `http://localhost:4000/api` |
+
+---
+
+## 5. Health & Diagnostic Verification
+
+Verify the deployment readiness by querying the health endpoint:
+```bash
+curl http://localhost:4000/api/health
+```
+
+**Healthy Output (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "database": "connected",
+  "service": "vanijya-backend",
+  "timestamp": "2026-09-02T12:00:00.000Z",
+  "sihProblemStatement": "26132 - Strengthening Market Linkages & Price Discovery for Farmers"
+}
+```
+
+**Degraded Output (`503 Service Unavailable`):**
+```json
+{
+  "status": "degraded",
+  "database": "disconnected",
+  "message": "MongoDB connection is unavailable. Ensure MONGODB_URI is configured and the database service is running.",
+  "service": "vanijya-backend",
+  "timestamp": "2026-09-02T12:00:00.000Z"
+}
+```

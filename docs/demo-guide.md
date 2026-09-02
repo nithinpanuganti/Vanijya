@@ -14,20 +14,17 @@ start-vanijya.bat
 
 ---
 
-## 2. Pre-Configured Demo Credentials & Visual Security Verification
+## 2. Pre-Configured Demo Credentials
 
 On the unified login page ([`http://localhost:3000/login`](http://localhost:3000/login)):
 1. Select a role tab to auto-fill demo credentials.
-2. Enter the visual alphanumeric security code (e.g. `K7P4X` shown in the distorted security box, or click `↻` to generate a fresh one).
-3. Click **"Sign In to Vanijya"**.
+2. Click **"Sign In to Vanijya"**.
 
 | Persona | Name / Entity | Identifier | Password | Role & Purpose |
 | :--- | :--- | :--- | :--- | :--- |
 | **Farmer (किसान)** | Ramesh Patel | `9876543210` | `Farmer@123` | Nashik, Maharashtra (KCC Verified Producer) |
 | **Buyer (व्यापारी)** | FreshCart Agro Ltd. | `buyer@freshcart.com` | `asdfcv321` | Mumbai, Maharashtra (Wholesale Sourcing) |
 | **Admin (व्यवस्थापक)** | Vanijya System Admin | `admin@vanijya.gov.in` | `Admin@123` | Ministry of Agriculture Oversight |
-
-> **Visual CAPTCHA Architecture:** Distorted SVG image generated server-side with random rotation, offset, interference curves, and noise dots. Challenge answers are cryptographically hashed on the server with a 5-minute expiry and single-use enforcement.
 
 ---
 
@@ -41,7 +38,7 @@ On the unified login page ([`http://localhost:3000/login`](http://localhost:3000
 ---
 
 ### Step 2: Farmer Produce Listing & Separated Categories (0:45 - 1:30)
-1. Sign in as **Farmer** (`9876543210` + CAPTCHA).
+1. Sign in as **Farmer** (`9876543210` / `Farmer@123`).
 2. Point out the **6 Real KPI Cards** on the Farmer Dashboard (*Active Bidding*, *Sold*, *Pending Bids*, *Open Lots*, *Total Sales*, *Pending Payments*).
 3. Click **"Publish New Crop Lot"** (`/create-lot`):
    - *Crop:* Tomato
@@ -54,7 +51,7 @@ On the unified login page ([`http://localhost:3000/login`](http://localhost:3000
 ---
 
 ### Step 3: Buyer Sourcing & Bidding (1:30 - 2:15)
-1. Sign in as **Buyer** (`buyer@freshcart.com` / `asdfcv321` + CAPTCHA).
+1. Sign in as **Buyer** (`buyer@freshcart.com` / `asdfcv321`).
 2. Open the Tomato lot in the **Marketplace** (`/browse-lots`).
 3. View Farmer Expected Rate (**₹2,200/Qtl**) and Farm-Gate Location.
 4. Submit a bid of **₹2,200/Qtl for 100 Qtl**.
@@ -74,7 +71,7 @@ On the unified login page ([`http://localhost:3000/login`](http://localhost:3000
 ---
 
 ### Step 5: Admin National Monitoring & Live Audit Trail (2:45 - 3:15)
-1. Sign in as **Admin** (`admin@vanijya.gov.in` + CAPTCHA).
+1. Sign in as **Admin** (`admin@vanijya.gov.in` / `Admin@123`).
 2. Access the **Unified Monitoring Cockpit** (`/dashboard`):
    - **Real-Time KPI Cards:** Active Bidding Lots, Sold Lots, Modified Bids, Cancelled Bids, Traded GMV.
    - **Lots Monitor Tab:** Inspect all listings with farmer asking rates and status.

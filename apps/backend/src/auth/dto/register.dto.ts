@@ -121,14 +121,4 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   apmcLicense?: string;
-
-  @ApiPropertyOptional({ example: 'cpt-17879029910-a1b2', description: 'Visual CAPTCHA challenge ID' })
-  @IsString()
-  @IsOptional()
-  captchaId?: string;
-
-  @ApiPropertyOptional({ example: 'K7P4X', description: 'Visual CAPTCHA answer entered by user' })
-  @IsString()
-  @IsOptional()
-  captchaAnswer?: string;
 }

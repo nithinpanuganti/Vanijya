@@ -14,22 +14,6 @@ export class LoginDto {
   password: string;
 
   @ApiPropertyOptional({
-    example: 'cpt-17879029910-a1b2',
-    description: 'Server-issued CAPTCHA challenge ID from GET /api/auth/captcha',
-  })
-  @IsString()
-  @IsOptional()
-  captchaId?: string;
-
-  @ApiPropertyOptional({
-    example: 'K7P4X',
-    description: 'User-entered alphanumeric CAPTCHA answer',
-  })
-  @IsString()
-  @IsOptional()
-  captchaAnswer?: string;
-
-  @ApiPropertyOptional({
     enum: Role,
     example: Role.FARMER,
     description: 'Optional selected role on login form to verify account match',

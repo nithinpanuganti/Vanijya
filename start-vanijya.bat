@@ -39,9 +39,28 @@ if not exist "apps\backend\.env" (
 )
 
 REM -----------------------------------------------------------------------------
-REM 3. MongoDB Connectivity Check and Auto-Start Attempt
+REM 3. Dependencies Check
 REM -----------------------------------------------------------------------------
-echo [3/6] Checking MongoDB database connection...
+if not exist "node_modules\" (
+    echo [3/6] Installing dependencies for first-time run...
+    call npm.cmd install
+    if errorlevel 1 goto ERR_NPM
+    echo [3/6] Dependencies installed successfully.
+) else (
+    echo [3/6] Dependencies verified.
+)
+
+REM -----------------------------------------------------------------------------
+REM 4. MongoDB Database Setup & Auto-Start
+REM -----------------------------------------------------------------------------
+echo [4/6] Initializing MongoDB database connection...
+
+REM Check if .env contains MongoDB Atlas string
+findstr /i "mongodb+srv" "apps\backend\.env" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [4/6] MongoDB Atlas Cloud connection string detected in apps\backend\.env.
+    goto DB_READY
+)
 
 REM Try starting MongoDB Windows service if installed
 sc query MongoDB >nul 2>&1
@@ -49,39 +68,25 @@ if %errorlevel% equ 0 (
     net start MongoDB >nul 2>&1
 )
 
-REM Test port 27017 using PowerShell
+REM Test port 27017
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$tcp = New-Object System.Net.Sockets.TcpClient; try { $tcp.Connect('127.0.0.1', 27017); exit 0 } catch { exit 1 } finally { $tcp.Close() }" >nul 2>&1
-if %errorlevel% neq 0 (
-    REM Check if .env contains MongoDB Atlas string
-    findstr /i "mongodb+srv" "apps\backend\.env" >nul 2>&1
-    if %errorlevel% equ 0 (
-        echo [3/6] MongoDB Atlas Cloud connection string detected in apps\backend\.env.
-    ) else (
-        echo.
-        echo [WARNING] Local MongoDB is not running on 127.0.0.1:27017.
-        echo If you have local MongoDB installed, start it with: net start MongoDB
-        echo If not installed, you can:
-        echo   1. Install local MongoDB: winget install MongoDB.Server
-        echo   2. Or configure a free MongoDB Atlas cloud cluster in apps\backend\.env
-        echo.
-        echo Attempting to proceed with backend launch...
-        echo.
-    )
-) else (
-    echo [3/6] Local MongoDB active on port 27017.
+if %errorlevel% equ 0 (
+    echo [4/6] Local MongoDB active on port 27017.
+    goto DB_READY
 )
 
-REM -----------------------------------------------------------------------------
-REM 4. Dependencies Check
-REM -----------------------------------------------------------------------------
-if not exist "node_modules\" (
-    echo [4/6] Installing dependencies for first-time run...
-    call npm.cmd install
-    if errorlevel 1 goto ERR_NPM
-    echo [4/6] Dependencies installed successfully.
+echo [4/6] Starting local standalone MongoDB instance on port 27017...
+start "Vanijya Local MongoDB (Port 27017)" /D "%~dp0" cmd /k "npm.cmd run mongo"
+
+REM Wait up to 15 seconds for MongoDB to start listening on port 27017
+powershell -NoProfile -Command "for ($i=0; $i -lt 15; $i++) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $tcp.Connect('127.0.0.1', 27017); $tcp.Close(); exit 0 } catch {}; Start-Sleep -Seconds 1 }; exit 1" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [4/6] Local MongoDB instance initialized successfully.
 ) else (
-    echo [4/6] Dependencies verified.
+    echo [4/6] Warning: MongoDB taking longer to start, proceeding with application launch...
 )
+
+:DB_READY
 
 REM -----------------------------------------------------------------------------
 REM 5. Build Artifacts Check
@@ -111,8 +116,8 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000 "') do taskkill /f /pi
 echo Starting Backend API (Port 4000)...
 start "Vanijya Backend (Port 4000)" /D "%~dp0" cmd /k "node apps/backend/dist/main.js"
 
-REM Wait for backend initialization
-echo Waiting for backend database connection...
+REM Wait for backend initialization and database connection
+echo Waiting for backend to connect to MongoDB...
 powershell -NoProfile -Command "for ($i=0; $i -lt 15; $i++) { try { $res = Invoke-RestMethod -Uri 'http://localhost:4000/api/health' -TimeoutSec 2 -ErrorAction Stop; if ($res.status -eq 'ok') { exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 1" >nul 2>&1
 
 echo Starting Unified Web Portal (Port 3000)...

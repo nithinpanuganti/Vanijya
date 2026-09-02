@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { useLanguage } from '../../lib/language-context';
 import { useToast } from '../../components/ui/toast';
-import { Captcha, CaptchaHandle } from '../../components/security/captcha';
 import { PhotoCapture } from '../../components/common/photo-capture';
 import { LocationCapture } from '../../components/common/location-capture';
 import {
@@ -37,7 +36,6 @@ export default function UnifiedSignupPage() {
   const router = useRouter();
   const { t, language } = useLanguage();
   const { showToast } = useToast();
-  const captchaRef = useRef<CaptchaHandle>(null);
 
   // Workflow Steps: 'SELECT_PERSONA' -> 'FILL_FORM' -> 'SUBMITTED'
   const [step, setStep] = useState<'SELECT_PERSONA' | 'FILL_FORM' | 'SUBMITTED'>('SELECT_PERSONA');
@@ -74,12 +72,6 @@ export default function UnifiedSignupPage() {
   const [gstin, setGstin] = useState('');
   const [fssai, setFssai] = useState('');
 
-  // Security CAPTCHA State
-  const [captchaData, setCaptchaData] = useState<{ captchaId: string; captchaAnswer: string }>({
-    captchaId: '',
-    captchaAnswer: '',
-  });
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
@@ -89,7 +81,7 @@ export default function UnifiedSignupPage() {
   const hasUpper = /[A-Z]/.test(password);
   const hasLower = /[a-z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
-  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+  const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password);
 
   const rulesPassed = [hasMinLength, hasUpper, hasLower, hasNumber, hasSpecial].filter(Boolean).length;
   let strengthLabel = t.passwordStrengthWeak;
@@ -100,33 +92,24 @@ export default function UnifiedSignupPage() {
     strengthLabel = t.passwordStrengthStrong;
     strengthColor = 'bg-emerald-500';
     strengthPercent = 100;
-  } else if (rulesPassed >= 3) {
+  } else if (rulesPassed >= 4) {
     strengthLabel = t.passwordStrengthMedium;
     strengthColor = 'bg-amber-500';
+    strengthPercent = 80;
+  } else if (rulesPassed >= 3) {
+    strengthLabel = t.passwordStrengthMedium;
+    strengthColor = 'bg-amber-400';
     strengthPercent = 60;
+  } else if (rulesPassed >= 2) {
+    strengthLabel = t.passwordStrengthWeak;
+    strengthColor = 'bg-rose-400';
+    strengthPercent = 40;
   }
 
-  const isPasswordValid = rulesPassed === 5;
+  const isPasswordValid = rulesPassed >= 5;
   const doPasswordsMatch = password === confirmPassword && confirmPassword.length > 0;
 
-  const handleSelectPersona = (chosen: AccountPersona) => {
-    setPersona(chosen);
-    setErrorMessage(null);
-    if (chosen === 'FARMER') {
-      setLocation('Village Pimpalgaon, Niphad Taluka, Nashik');
-      setVillage('Pimpalgaon Baswant');
-      setState('Maharashtra');
-      setDistrict('Nashik');
-    } else {
-      setLocation('Vashi APMC Complex, Navi Mumbai');
-      setState('Maharashtra');
-      setDistrict('Mumbai');
-      setWarehouseLocation('Vashi APMC Sector 19, Navi Mumbai');
-    }
-    setStep('FILL_FORM');
-  };
-
-  const handleSubmitRegistration = async (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -139,12 +122,6 @@ export default function UnifiedSignupPage() {
     if (!doPasswordsMatch) {
       setErrorMessage(t.passwordMatchError);
       showToast(t.passwordMatchError, 'error');
-      return;
-    }
-
-    if (!captchaData.captchaAnswer || captchaData.captchaAnswer.trim() === '') {
-      setErrorMessage(t.errCaptchaRequired);
-      showToast(t.errCaptchaRequired, 'error');
       return;
     }
 
@@ -161,8 +138,6 @@ export default function UnifiedSignupPage() {
         district,
         location,
         preferredLanguage,
-        captchaId: captchaData.captchaId,
-        captchaAnswer: captchaData.captchaAnswer.trim().toUpperCase(),
       };
 
       if (photoBase64) {
@@ -199,553 +174,511 @@ export default function UnifiedSignupPage() {
       const msg = err.message || t.errServerError;
       setErrorMessage(msg);
       showToast(msg, 'error');
-      captchaRef.current?.refresh();
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // -------------------------------------------------------------
-  // STEP 3: REGISTRATION SUBMITTED SUCCESS SCREEN
-  // -------------------------------------------------------------
-  if (step === 'SUBMITTED') {
-    return (
-      <div className="max-w-lg mx-auto bg-white p-8 md:p-10 rounded-3xl border-2 border-amber-300 shadow-xl text-center space-y-6 my-6 animate-in zoom-in-95 duration-300">
-        <div className="w-20 h-20 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto shadow-inner">
-          <Clock className="w-10 h-10 animate-pulse" />
-        </div>
-
-        <div className="space-y-2">
-          <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider text-amber-900 bg-amber-200 px-3.5 py-1 rounded-full border border-amber-300">
-            <Clock className="w-3.5 h-3.5" />
-            {t.pendingApprovalBadge}
-          </span>
-          <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
-            {t.registrationSubmittedTitle}
-          </h1>
-          <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-            {t.pendingApprovalDesc}
-          </p>
-        </div>
-
-        {photoBase64 && (
-          <div className="w-20 h-20 mx-auto rounded-full overflow-hidden border-2 border-emerald-500 shadow-md">
-            <img src={photoBase64} alt="Applicant" className="w-full h-full object-cover" />
-          </div>
-        )}
-
-        <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 text-left space-y-2 text-xs">
-          <div className="flex justify-between border-b border-amber-100 pb-2 font-bold">
-            <span className="text-slate-500">Account Type:</span>
-            <span className="text-slate-900 font-black">
-              {persona === 'FARMER' ? `🌾 Farmer Producer` : `🏢 Institutional Buyer`}
-            </span>
-          </div>
-          <div className="flex justify-between border-b border-amber-100 pb-2">
-            <span className="text-slate-500">Applicant:</span>
-            <strong className="text-slate-900">{name || organization}</strong>
-          </div>
-          <div className="flex justify-between border-b border-amber-100 pb-2">
-            <span className="text-slate-500">Mobile Number:</span>
-            <strong className="text-slate-900">{phone}</strong>
-          </div>
-          <div className="flex justify-between border-b border-amber-100 pb-2">
-            <span className="text-slate-500">Region:</span>
-            <strong className="text-slate-900">{district}, {state}</strong>
-          </div>
-          {geoCoordinates && (
-            <div className="flex justify-between">
-              <span className="text-slate-500">GPS Coordinates:</span>
-              <strong className="text-emerald-800 font-mono">
-                {geoCoordinates.latitude.toFixed(4)}° N, {geoCoordinates.longitude.toFixed(4)}° E
-              </strong>
-            </div>
-          )}
-        </div>
-
-        <div className="pt-2">
-          <Link
-            href="/login"
-            className="block w-full bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black py-3.5 rounded-2xl text-xs transition shadow-md shadow-amber-500/25"
-          >
-            &larr; {t.btnBackToLogin}
-          </Link>
-        </div>
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 pb-12 animate-in fade-in duration-300">
+      {/* Navigation Breadcrumb */}
+      <div className="flex items-center justify-between">
+        <Link href="/" className="inline-flex items-center gap-1.5 text-xs text-amber-800 font-bold hover:underline">
+          <ArrowLeft className="w-3.5 h-3.5" /> {t.navHome}
+        </Link>
+        <Link href="/login" className="text-xs font-bold text-slate-600 hover:text-slate-900">
+          Already have an account? <span className="text-amber-900 font-black hover:underline">{t.navLogin}</span>
+        </Link>
       </div>
-    );
-  }
 
-  // -------------------------------------------------------------
-  // STEP 1: PERSONA SELECTION
-  // -------------------------------------------------------------
-  if (step === 'SELECT_PERSONA') {
-    return (
-      <div className="max-w-xl mx-auto space-y-6 animate-in fade-in duration-300">
-        <div className="bg-white p-6 md:p-8 rounded-3xl border border-amber-200 shadow-md space-y-6 text-center">
-          <div className="space-y-1">
-            <span className="bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-[10px] font-black px-3 py-1 rounded-full uppercase">
-              SIH 26132 Unified Verification Portal
-            </span>
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight pt-2">
+      {/* STEP 1: Persona Selection */}
+      {step === 'SELECT_PERSONA' && (
+        <div className="bg-white p-6 md:p-10 rounded-3xl border border-amber-200 shadow-lg space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 rounded-2xl flex items-center justify-center mx-auto shadow-md shadow-amber-500/25">
+              <UserPlus className="w-7 h-7" />
+            </div>
+            <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
               {t.signupTitle}
             </h1>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Select your primary marketplace role to begin the official verification onboarding.
+            <p className="text-xs md:text-sm text-slate-600 max-w-md mx-auto">
+              {t.signupSubtitle}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
-            {/* Persona: Farmer */}
-            <button
-              type="button"
-              onClick={() => handleSelectPersona('FARMER')}
-              className="p-5 rounded-2xl border-2 border-emerald-200 hover:border-emerald-500 bg-emerald-50/50 hover:bg-emerald-50 transition space-y-3 group text-left relative overflow-hidden"
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            {/* Farmer Card */}
+            <div
+              onClick={() => setPersona('FARMER')}
+              className={`p-6 rounded-3xl border-2 transition cursor-pointer relative overflow-hidden flex flex-col justify-between space-y-4 ${
+                persona === 'FARMER'
+                  ? 'border-amber-500 bg-amber-50/70 shadow-md ring-2 ring-amber-400/50'
+                  : 'border-slate-200 hover:border-amber-300 bg-white'
+              }`}
             >
-              <div className="w-12 h-12 bg-emerald-100 text-emerald-800 rounded-2xl flex items-center justify-center font-bold text-xl group-hover:scale-110 transition">
-                🌾
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-200/70 text-amber-950 flex items-center justify-center font-black">
+                  <Sprout className="w-6 h-6 text-amber-800" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">🌾 {t.roleFarmer}</h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {t.accountTypeFarmerDesc}
+                  </p>
+                </div>
+                <div className="space-y-1.5 text-[11px] font-bold text-slate-700">
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> List crop lots & receive direct bids
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Guaranteed direct payment to bank
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Mandi benchmark arbitrage alerts
+                  </div>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900 flex items-center justify-between">
-                  {t.accountTypeFarmer}
-                  <ArrowRight className="w-4 h-4 text-emerald-600 opacity-0 group-hover:opacity-100 transition" />
-                </h3>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  {t.accountTypeFarmerDesc}
-                </p>
+              <div className="pt-2">
+                <span className={`inline-block w-full text-center py-2 px-3 rounded-xl text-xs font-black transition ${
+                  persona === 'FARMER' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {persona === 'FARMER' ? '✓ Selected' : 'Select Farmer Account'}
+                </span>
               </div>
-              <span className="inline-block text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                0% Middleman Commission
-              </span>
-            </button>
+            </div>
 
-            {/* Persona: Buyer */}
-            <button
-              type="button"
-              onClick={() => handleSelectPersona('BUYER')}
-              className="p-5 rounded-2xl border-2 border-amber-200 hover:border-amber-500 bg-amber-50/50 hover:bg-amber-50 transition space-y-3 group text-left relative overflow-hidden"
+            {/* Buyer Card */}
+            <div
+              onClick={() => setPersona('BUYER')}
+              className={`p-6 rounded-3xl border-2 transition cursor-pointer relative overflow-hidden flex flex-col justify-between space-y-4 ${
+                persona === 'BUYER'
+                  ? 'border-amber-500 bg-amber-50/70 shadow-md ring-2 ring-amber-400/50'
+                  : 'border-slate-200 hover:border-amber-300 bg-white'
+              }`}
             >
-              <div className="w-12 h-12 bg-amber-100 text-amber-900 rounded-2xl flex items-center justify-center font-bold text-xl group-hover:scale-110 transition">
-                🏢
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-200/70 text-amber-950 flex items-center justify-center font-black">
+                  <Building2 className="w-6 h-6 text-amber-800" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">🏢 {t.roleBuyer}</h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {t.accountTypeBuyerDesc}
+                  </p>
+                </div>
+                <div className="space-y-1.5 text-[11px] font-bold text-slate-700">
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Source bulk farm-gate lots
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Verified farmer identity & origin
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Digital purchase contracts & settlement
+                  </div>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900 flex items-center justify-between">
-                  {t.accountTypeBuyer}
-                  <ArrowRight className="w-4 h-4 text-amber-600 opacity-0 group-hover:opacity-100 transition" />
-                </h3>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  {t.accountTypeBuyerDesc}
-                </p>
+              <div className="pt-2">
+                <span className={`inline-block w-full text-center py-2 px-3 rounded-xl text-xs font-black transition ${
+                  persona === 'BUYER' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {persona === 'BUYER' ? '✓ Selected' : 'Select Buyer Account'}
+                </span>
               </div>
-              <span className="inline-block text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                Direct Farm-Gate Procurement
-              </span>
-            </button>
+            </div>
           </div>
 
-          <div className="text-center pt-2">
-            <span className="text-xs text-slate-500">Already registered on Vanijya? </span>
-            <Link href="/login" className="text-xs font-bold text-amber-800 hover:underline">
-              {t.btnSignIn}
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // STEP 2: FILL REGISTRATION DETAILS FORM
-  // -------------------------------------------------------------
-  return (
-    <div className="max-w-2xl mx-auto space-y-5 animate-in fade-in duration-300">
-      <button
-        type="button"
-        onClick={() => setStep('SELECT_PERSONA')}
-        className="inline-flex items-center gap-1 text-xs text-amber-800 font-bold hover:underline"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" /> Switch Account Persona
-      </button>
-
-      <div className="bg-white p-6 md:p-8 rounded-3xl border border-amber-200 shadow-md space-y-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-              {persona === 'FARMER' ? '🌾 Farmer Registration' : '🏢 Buyer Registration'}
+          <div className="pt-4 flex items-center justify-between border-t border-amber-100">
+            <span className="text-xs text-slate-500">
+              * Administrator accounts are government-authorized and cannot be self-registered.
             </span>
-            <span className="text-xs text-slate-400 font-medium">Vanijya Verification Portal</span>
+            <button
+              type="button"
+              onClick={() => setStep('FILL_FORM')}
+              className="py-3 px-6 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs rounded-2xl shadow-md shadow-amber-500/20 transition flex items-center gap-2 active:scale-95"
+            >
+              Continue to Application Details <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            {persona === 'FARMER' ? 'Farmer Producer Registration' : 'Institutional Buyer Registration'}
-          </h1>
-          <p className="text-xs text-slate-500">
-            Submit your credentials, live photo, and GPS location for admin review and market access.
-          </p>
         </div>
+      )}
 
-        {errorMessage && (
-          <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-2xl font-medium flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{errorMessage}</span>
+      {/* STEP 2: Application Form */}
+      {step === 'FILL_FORM' && (
+        <div className="bg-white p-6 md:p-8 rounded-3xl border border-amber-200 shadow-md space-y-6">
+          <div className="flex items-center justify-between border-b border-amber-100 pb-4">
+            <div>
+              <span className="text-[11px] font-black uppercase tracking-wider text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full">
+                Step 2 of 2
+              </span>
+              <h2 className="text-xl font-black text-slate-900 mt-1">
+                {persona === 'FARMER' ? '🌾 Farmer Registration Form' : '🏢 Wholesale Buyer Registration Form'}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStep('SELECT_PERSONA')}
+              className="text-xs font-bold text-amber-900 hover:underline flex items-center gap-1"
+            >
+              Change Persona
+            </button>
           </div>
-        )}
 
-        <form onSubmit={handleSubmitRegistration} className="space-y-6">
-          {/* Section 1: Applicant Profile Photo Capture */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <Camera className="w-3.5 h-3.5 text-amber-700" />
-              1. Identity Profile Photo Verification
-            </h3>
-            <PhotoCapture onPhotoSelected={setPhotoBase64} required={true} />
-          </div>
+          {errorMessage && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
 
-          {/* Section 2: Basic Identity */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
-              2. Basic Identity & Contact Details
-            </h3>
+          <form onSubmit={handleRegisterSubmit} className="space-y-6">
+            {/* Section 1: Identity & Contact */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
+                <FileText className="w-3.5 h-3.5 text-amber-700" />
+                1. Basic Identity Information
+              </h3>
 
-            {persona === 'FARMER' ? (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.fieldName} *</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Ramesh V. Patel"
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
-              </div>
-            ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.fieldOrganization} *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Legal Name *</label>
                   <input
                     type="text"
                     required
-                    value={organization}
-                    onChange={(e) => setOrganization(e.target.value)}
-                    placeholder="e.g. FreshCart Agro Limited"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={persona === 'FARMER' ? 'e.g. Ramesh Patel' : 'e.g. Praveen Kumar'}
                     className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.contactPersonLabel} *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Number *</label>
                   <input
-                    type="text"
+                    type="tel"
                     required
-                    value={contactPerson}
-                    onChange={(e) => {
-                      setContactPerson(e.target.value);
-                      setName(e.target.value);
-                    }}
-                    placeholder="e.g. Praveen Kumar"
+                    maxLength={10}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                    placeholder="10-digit mobile number"
                     className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
-              </div>
-            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Phone className="w-3.5 h-3.5 text-amber-700" />
-                  10-Digit Mobile Number *
-                </label>
-                <input
-                  type="tel"
-                  required
-                  maxLength={10}
-                  pattern="[0-9]{10}"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                  placeholder="9876543210"
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Mail className="w-3.5 h-3.5 text-amber-700" />
-                  Email Address {persona === 'BUYER' ? '*' : '(Optional)'}
-                </label>
-                <input
-                  type="email"
-                  required={persona === 'BUYER'}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. contact@domain.in"
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Geolocation and Regional Address */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <MapPin className="w-3.5 h-3.5 text-amber-700" />
-              3. Geolocation & Sourcing Hub
-            </h3>
-
-            {/* GPS Capture Widget */}
-            <LocationCapture onLocationCaptured={setGeoCoordinates} />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.fieldState} *</label>
-                <input
-                  type="text"
-                  required
-                  value={state}
-                  onChange={(e) => setState(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.fieldDistrict} *</label>
-                <input
-                  type="text"
-                  required
-                  value={district}
-                  onChange={(e) => setDistrict(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Email Address {persona === 'BUYER' ? '*' : '(Optional)'}
+                  </label>
+                  <input
+                    type="email"
+                    required={persona === 'BUYER'}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={persona === 'BUYER' ? 'procurement@company.com' : 'name@example.com (optional)'}
+                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
 
-            {persona === 'FARMER' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Section 2: Profile Photo Capture */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
+                <Camera className="w-3.5 h-3.5 text-amber-700" />
+                2. Profile Photo / Identity Snapshot
+              </h3>
+              <PhotoCapture
+                onPhotoSelected={(base64: string | null) => setPhotoBase64(base64)}
+              />
+            </div>
+
+            {/* Section 3: Geolocation Coordinates & Regional Address */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
+                <Navigation className="w-3.5 h-3.5 text-amber-700" />
+                3. Geographic Location & Coordinates
+              </h3>
+
+              <LocationCapture
+                onLocationCaptured={(coords) => setGeoCoordinates(coords)}
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.villageLabel} *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.stateLabel} *</label>
                   <input
                     type="text"
                     required
-                    value={village}
-                    onChange={(e) => setVillage(e.target.value)}
-                    placeholder="e.g. Pimpalgaon Baswant"
+                    value={state}
+                    onChange={(e) => setState(e.target.value)}
+                    placeholder="e.g. Maharashtra"
                     className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.fieldLocation}</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.districtLabel} *</label>
                   <input
                     type="text"
+                    required
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
+                    placeholder="e.g. Nashik"
+                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Dispatch / Receiving Location *</label>
+                  <input
+                    type="text"
+                    required
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
-                    placeholder="e.g. Niphad Taluka Farm Gate"
+                    placeholder={persona === 'FARMER' ? 'e.g. Pimpalgaon Farm Gate, Niphad Taluka, Nashik' : 'e.g. Sector 19, Vashi Wholesale APMC Market, Navi Mumbai'}
                     className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.warehouseLabel} *</label>
-                <input
-                  type="text"
-                  required
-                  value={warehouseLocation}
-                  onChange={(e) => setWarehouseLocation(e.target.value)}
-                  placeholder="e.g. Sector 19, Vashi APMC Terminal"
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
-              </div>
-            )}
-          </div>
+            </div>
 
-          {/* Section 4: Operational Profile */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <FileText className="w-3.5 h-3.5 text-amber-700" />
-              4. Operational & Licensing Credentials
-            </h3>
+            {/* Section 4: Operational Credentials */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
+                <FileText className="w-3.5 h-3.5 text-amber-700" />
+                4. Operational Credentials & KYC
+              </h3>
 
-            {persona === 'FARMER' ? (
+              {persona === 'FARMER' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.primaryCropLabel} *</label>
+                    <input
+                      type="text"
+                      required
+                      value={primaryCrop}
+                      onChange={(e) => setPrimaryCrop(e.target.value)}
+                      placeholder="e.g. Tomato, Onion, Wheat, Rice"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.farmSizeLabel} *</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={farmSize}
+                      onChange={(e) => setFarmSize(e.target.value)}
+                      placeholder="e.g. 5.0"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.villageLabel} (Optional)</label>
+                    <input
+                      type="text"
+                      value={village}
+                      onChange={(e) => setVillage(e.target.value)}
+                      placeholder="e.g. Pimpalgaon Baswant"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.kccOptionalLabel}</label>
+                    <input
+                      type="text"
+                      value={kccNumber}
+                      onChange={(e) => setKccNumber(e.target.value)}
+                      placeholder="e.g. KCC-MAH-992144"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Organization / Company Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={organization}
+                      onChange={(e) => setOrganization(e.target.value)}
+                      placeholder="e.g. FreshCart Agro Limited"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.businessTypeLabel} *</label>
+                    <select
+                      value={businessType}
+                      onChange={(e) => setBusinessType(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    >
+                      <option value="Wholesale Trader / Processor">Wholesale Trader / Processor</option>
+                      <option value="Modern Retail Chain">Modern Retail Chain</option>
+                      <option value="Agri-Exporter">Agri-Exporter</option>
+                      <option value="Food Processing Enterprise">Food Processing Enterprise</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.gstinOptionalLabel}</label>
+                    <input
+                      type="text"
+                      value={gstin}
+                      onChange={(e) => setGstin(e.target.value)}
+                      placeholder="e.g. 27AABCU9603R1ZM"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono uppercase"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.fssaiOptionalLabel}</label>
+                    <input
+                      type="text"
+                      value={fssai}
+                      onChange={(e) => setFssai(e.target.value)}
+                      placeholder="e.g. 10019022009876"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Section 5: Password Security */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-700" />
+                5. Account Security Credentials
+              </h3>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.primaryCropLabel}</label>
-                  <select
-                    value={primaryCrop}
-                    onChange={(e) => setPrimaryCrop(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                  >
-                    <option value="Tomato">🍅 Tomato (टमाटर / టమోటా)</option>
-                    <option value="Onion">🧅 Onion (प्याज / ఉల్లిపాయ)</option>
-                    <option value="Potato">🥔 Potato (आलू / బంగాళాదుంప)</option>
-                    <option value="Wheat">🌾 Wheat (गेहूं / గోధుమలు)</option>
-                    <option value="Paddy">🍚 Paddy / Rice (धान / వరి)</option>
-                    <option value="Cotton">🌱 Cotton (कपास / పత్తి)</option>
-                    <option value="Soybean">🫘 Soybean (सोयाबीन / సోయాబీన్)</option>
-                    <option value="Maize">🌽 Maize (मक्का / మొక్కజొన్న)</option>
-                  </select>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.passwordLabel} *</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Min 8 chars, 1 Upper, 1 Lower, 1 Symbol"
+                      className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.farmSizeLabel} (Acres)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0.5"
-                    value={farmSize}
-                    onChange={(e) => setFarmSize(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.kccOptionalLabel}</label>
-                  <input
-                    type="text"
-                    value={kccNumber}
-                    onChange={(e) => setKccNumber(e.target.value)}
-                    placeholder="e.g. KCC-MH-NSK-8821"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.apmcOptionalLabel}</label>
-                  <input
-                    type="text"
-                    value={apmcLicense}
-                    onChange={(e) => setApmcLicense(e.target.value)}
-                    placeholder="e.g. APMC-NSK-FMR-1042"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.businessTypeLabel}</label>
-                  <input
-                    type="text"
-                    value={businessType}
-                    onChange={(e) => setBusinessType(e.target.value)}
-                    placeholder="e.g. Food Processor / Institutional Buyer"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.gstinOptionalLabel}</label>
-                  <input
-                    type="text"
-                    value={gstin}
-                    onChange={(e) => setGstin(e.target.value.toUpperCase())}
-                    placeholder="e.g. 27AABCU9603R1ZM"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.fssaiOptionalLabel}</label>
-                  <input
-                    type="text"
-                    value={fssai}
-                    onChange={(e) => setFssai(e.target.value)}
-                    placeholder="e.g. 10019022009876"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Section 5: Password Security */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <Lock className="w-3.5 h-3.5 text-amber-700" />
-              5. Account Security Credentials
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.passwordLabel} *</label>
-                <div className="relative">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.confirmPasswordLabel} *</label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Min 8 chars, 1 Upper, 1 Lower, 1 Symbol"
-                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none pr-10"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.confirmPasswordLabel} *</label>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-enter password"
-                  className="w-full px-3.5 py-2.5 bg-amber-50/40 border border-amber-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                />
-              </div>
+              {/* Password Strength Meter */}
+              {password.length > 0 && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="text-slate-600">Password Strength:</span>
+                    <span className={rulesPassed >= 5 ? 'text-emerald-700' : rulesPassed >= 3 ? 'text-amber-700' : 'text-rose-700'}>
+                      {strengthLabel}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                    <div className={`h-full ${strengthColor} transition-all duration-300`} style={{ width: `${strengthPercent}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Password Strength Meter */}
-            {password.length > 0 && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-                <div className="flex items-center justify-between font-bold">
-                  <span className="text-slate-600">Password Strength:</span>
-                  <span className={rulesPassed >= 5 ? 'text-emerald-700' : rulesPassed >= 3 ? 'text-amber-700' : 'text-rose-700'}>
-                    {strengthLabel}
-                  </span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div className={`h-full ${strengthColor} transition-all duration-300`} style={{ width: `${strengthPercent}%` }} />
-                </div>
-              </div>
-            )}
+            {/* Submit Action */}
+            <div className="pt-3">
+              <button
+                type="submit"
+                disabled={isSubmitting || !isPasswordValid || !doPasswordsMatch}
+                className="w-full py-4 px-6 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-500/25 transition disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.99]"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Submitting Application...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-5 h-5 text-slate-950" />
+                    Submit Application for Admin Verification
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* STEP 3: Confirmation Screen */}
+      {step === 'SUBMITTED' && (
+        <div className="bg-white p-8 md:p-12 rounded-3xl border border-amber-200 shadow-xl text-center space-y-6 animate-in zoom-in-95">
+          <div className="w-16 h-16 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto ring-8 ring-amber-50">
+            <Clock className="w-9 h-9" />
           </div>
 
-          {/* Section 6: Security Visual CAPTCHA */}
-          <div className="space-y-3 pt-2">
-            <h3 className="text-xs font-black uppercase text-amber-900 tracking-wider flex items-center gap-1.5 border-b border-amber-100 pb-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
-              6. Visual Security CAPTCHA Challenge
-            </h3>
-            <Captcha
-              ref={captchaRef}
-              onCaptchaChange={(data) => setCaptchaData(data)}
-            />
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 py-1 px-3.5 bg-amber-100 text-amber-900 text-xs font-black rounded-full uppercase tracking-wider">
+              Status: PENDING_APPROVAL
+            </span>
+            <h2 className="text-2xl font-black text-slate-900">{t.registrationSubmittedTitle}</h2>
+            <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+              {t.pendingApprovalDesc}
+            </p>
           </div>
 
-          {/* Submit Action */}
-          <div className="pt-3">
-            <button
-              type="submit"
-              disabled={isSubmitting || !isPasswordValid || !doPasswordsMatch}
-              className="w-full py-4 px-6 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-500/25 transition disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.99]"
+          <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200 text-left text-xs space-y-2 max-w-md mx-auto">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-amber-700" />
+              Application Reference Details
+            </div>
+            <div className="text-[11px] text-slate-600 space-y-1 font-mono">
+              <div>Applicant: <strong className="font-sans text-slate-900">{name}</strong></div>
+              <div>Account Persona: <strong className="font-sans text-slate-900">{persona}</strong></div>
+              <div>Mobile Identifier: <strong className="font-sans text-slate-900">{phone}</strong></div>
+              <div>Regional Jurisdiction: <strong className="font-sans text-slate-900">{district}, {state}</strong></div>
+            </div>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/login"
+              className="py-3 px-6 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs rounded-2xl shadow-md transition text-center"
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Submitting Registration Dossier...</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4" />
-                  <span>Submit Application for Verification</span>
-                </>
-              )}
-            </button>
+              Return to Login Portal
+            </Link>
+            <Link
+              href="/"
+              className="py-3 px-6 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-2xl transition text-center"
+            >
+              {t.navHome}
+            </Link>
           </div>
-
-          <p className="text-[11px] text-center text-slate-500">
-            By submitting, you declare that all uploaded identity documents and crop/business credentials are accurate.
-          </p>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

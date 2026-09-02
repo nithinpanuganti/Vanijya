@@ -6,9 +6,8 @@
 ---
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
-[![Tests](https://img.shields.io/badge/Tests-67%2F67%20Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
+[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
 [![Database](https://img.shields.io/badge/Database-MongoDB%20%2B%20GridFS-green?style=for-the-badge&logo=mongodb)](https://github.com/nithinpanuganti/Vanijya)
-[![Security](https://img.shields.io/badge/CAPTCHA-Visual%20Alphanumeric%20SVG-orange?style=for-the-badge&logo=shield)](https://github.com/nithinpanuganti/Vanijya)
 [![Workflow](https://img.shields.io/badge/Verification-Admin%20Approval%20Workflow-emerald?style=for-the-badge&logo=checkmarx)](https://github.com/nithinpanuganti/Vanijya)
 [![Theme](https://img.shields.io/badge/Theme-Golden%20Yellow-amber?style=for-the-badge&color=f59e0b)](https://github.com/nithinpanuganti/Vanijya)
 [![Languages](https://img.shields.io/badge/Languages-English%20%7C%20%E0%A4%B9%E0%A4%BF%E0%A4%82%E0%A4%A6%E0%A4%85%20%7C%20%E0%B0%A4%E0%B1%86%E0%B0%B2%E0%B1%81%E0%B0%97%E0%B1%81-yellow?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
@@ -24,10 +23,6 @@
               ▼                           ▼
       PUBLIC MARKET DATA             COMMON LOGIN & SIGNUP
       (Agmarknet Benchmarks)              │
-                                          ▼
-                                 VISUAL ALPHANUMERIC
-                                       CAPTCHA
-                                          │
                                           ▼
                                 ADMIN VERIFICATION DESK
                                           │
@@ -50,11 +45,10 @@
 - **Step 3: Geolocation Coordination**:
   - Instant GPS location detection (`navigator.geolocation.getCurrentPosition`) saved as GeoJSON Point `[longitude, latitude]` with `2dsphere` spatial indexing.
   - Manual regional address fallback (State, District, Village / Warehouse Hub).
-- **Step 4: Operational Credentials & Security Challenge**:
+- **Step 4: Operational Credentials & KYC**:
   - **Farmers**: Primary Crop, Farm Size (Acres), KCC Number, APMC License.
   - **Buyers**: Organization, Contact Person, Business Type, Warehouse Location, GSTIN, FSSAI License.
   - **Live Password Strength Meter**: 5-point evaluation verifying 8+ characters, uppercase, lowercase, number, and special character rules.
-  - **Visual Alphanumeric CAPTCHA**: Direct SVG challenge verification with connection timeout handling and retry button.
 - **Step 5: Registration Confirmation Screen**: Displays 🟡 **Pending Admin Verification**.
 - **Login Enforcement**:
   - `PENDING` accounts are blocked with an approval status notification.
@@ -104,26 +98,24 @@
 | :--- | :--- | :--- |
 | **Unified Web Portal** | [**http://localhost:3000**](http://localhost:3000) | Public landing page with live mandi tickers & core features |
 | **Public Price Discovery** | [**http://localhost:3000/prices**](http://localhost:3000/prices) | Live rates, 7-day trend chart & arbitrage (No login needed) |
-| **Common Sign In** | [**http://localhost:3000/login**](http://localhost:3000/login) | Unified login with visual CAPTCHA & approval check |
-| **Unified Registration** | [**http://localhost:3000/signup**](http://localhost:3000/signup) | Photo capture, GPS location, password meter & CAPTCHA |
+| **Common Sign In** | [**http://localhost:3000/login**](http://localhost:3000/login) | Unified login with credential & approval check |
+| **Unified Registration** | [**http://localhost:3000/signup**](http://localhost:3000/signup) | Photo capture, GPS location, password meter & KYC |
 | **Smart Dashboard** | [**http://localhost:3000/dashboard**](http://localhost:3000/dashboard) | Role-aware cockpit (Farmer, Buyer, Admin Verification Desk) |
 | **Farmer Lots & Bids** | [**http://localhost:3000/my-lots**](http://localhost:3000/my-lots) | Category tabs: All, Active Bidding, Sold, Open, Cancelled |
 | **Buyer Active Bids** | [**http://localhost:3000/my-bids**](http://localhost:3000/my-bids) | Buyer bids management with Modify Quantity & Cancel Bid |
 | **Marketplace Catalog** | [**http://localhost:3000/browse-lots**](http://localhost:3000/browse-lots) | Sourcing lots with live procurement value calculation |
 | **Profile Management** | [**http://localhost:3000/profile**](http://localhost:3000/profile) | Identity photo, GPS location, and KYC completion gauge |
-| **Backend API & Swagger Docs** | [**http://localhost:4000/api/docs**](http://localhost:4000/api/docs) | 34 NestJS REST APIs & Swagger interactive docs |
+| **Backend API & Swagger Docs** | [**http://localhost:4000/api/docs**](http://localhost:4000/api/docs) | 33 NestJS REST APIs & Swagger interactive docs |
 | **Backend Health Check** | [**http://localhost:4000/api/health**](http://localhost:4000/api/health) | Backend & MongoDB connection readiness status |
 
 ---
 
 ## 🔑 Pre-Configured Demo Credentials
 
-On the unified login page ([`http://localhost:3000/login`](http://localhost:3000/login)), click any role tab to auto-fill credentials:
-
 | Persona | Name / Entity | Identifier | Password | Role & Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **Farmer (किसान)** | Ramesh Patel | `9876543210` | `Farmer@123` | Nashik, Maharashtra (Verified Farmer) |
-| **Buyer (व्यापारी)** | FreshCart Agro Ltd. | `buyer@freshcart.com` | `asdfcv321` | Mumbai, Maharashtra (Verified Buyer) |
+| **Farmer (किसान)** | Ramesh Patel | `9876543210` | `Farmer@123` | Nashik, Maharashtra (KCC Verified Producer) |
+| **Buyer (व्यापारी)** | FreshCart Agro Ltd. | `buyer@freshcart.com` | `asdfcv321` | Mumbai, Maharashtra (Wholesale Sourcing) |
 | **Admin (व्यवस्थापक)** | Vanijya System Admin | `admin@vanijya.gov.in` | `Admin@123` | Ministry of Agriculture Oversight |
 
 ---
@@ -193,7 +185,7 @@ npm run dev --workspace=apps/web
 
 ## 🧪 Automated Testing
 
-All **67 automated unit, integration, and end-to-end transaction loop tests** pass with 100% success rate:
+All automated unit, integration, and end-to-end transaction loop tests pass with 100% success rate:
 ```bash
 npm test --workspace=@vanijya/backend
 ```
@@ -201,7 +193,6 @@ npm test --workspace=@vanijya/backend
 ```
 PASS src/e2e-live-loop.spec.ts
 PASS src/prices/services/price-analytics.service.spec.ts
-PASS src/auth/captcha.service.spec.ts
 PASS src/notifications/notifications.service.spec.ts
 PASS src/prices/prices.service.spec.ts
 PASS src/lots/lots.service.spec.ts
@@ -210,10 +201,9 @@ PASS src/auth/auth.service.spec.ts
 PASS src/admin/admin.service.spec.ts
 PASS src/bids/bids.service.spec.ts
 
-Test Suites: 10 passed, 10 total
-Tests:       67 passed, 67 total
+Test Suites: 9 passed, 9 total
+Tests:       63 passed, 63 total
 Snapshots:   0 total
-Time:        11.5 s
 ```
 
 ---
@@ -231,20 +221,19 @@ Time:        11.5 s
    └─ Take Live Webcam Snapshot or Upload Identity Photo (GridFS)
    └─ Click "Detect My Current Location" -> Acquires GPS Coordinates
 
-4. Step 3: Fill Details & Verify CAPTCHA
+4. Step 3: Fill Details & KYC
    └─ Name, Mobile (e.g. 9811223344), Password (with live strength gauge), Location & Crops
-   └─ Enter Visual Alphanumeric CAPTCHA (e.g. K7P4X)
    └─ Click "Submit Application for Verification"
 
 5. Step 4: View Confirmation Screen
    └─ Displays 🟡 "Pending Admin Verification"
 
 6. Attempt Login before Approval
-   └─ Go to /login -> Enter 9811223344 -> CAPTCHA -> Sign In
+   └─ Go to /login -> Enter 9811223344 -> Sign In
    └─ Blocked with notice: "Your account is awaiting admin approval."
 
 7. Login as System Administrator
-   └─ Use admin@vanijya.gov.in / Admin@123 -> Enter CAPTCHA -> Sign In
+   └─ Use admin@vanijya.gov.in / Admin@123 -> Sign In
    └─ Open "Registration Requests" tab in Admin Dashboard
    └─ Click "Review Application" -> Inspect Applicant Photo, GPS, and Credentials Dossier
    └─ Click "Approve User" (or "Reject Request" with constructive reason)
@@ -261,4 +250,4 @@ Time:        11.5 s
 - **Problem Statement:** SIH 26132
 - **Organization:** Ministry of Agriculture & Farmers Welfare
 - **Theme:** Agriculture, FoodTech & Rural Development
-- **Outcome:** Direct farmer price discovery, visual alphanumeric CAPTCHA security verification, live photo capture & GridFS verification, GeoJSON location capture, complete registration & admin verification lifecycle, persistent multi-event notifications, and auditable national trade monitoring.
+- **Outcome:** Direct farmer price discovery, live photo capture & GridFS verification, GeoJSON location capture, complete registration & admin verification lifecycle, persistent multi-event notifications, and auditable national trade monitoring.

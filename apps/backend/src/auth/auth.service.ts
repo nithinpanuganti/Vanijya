@@ -21,7 +21,6 @@ import {
   AuditAction,
   NotificationType,
 } from '../database/schemas';
-import { CaptchaService } from './captcha.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
@@ -43,7 +42,6 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly jwtService: JwtService,
-    private readonly captchaService: CaptchaService,
     private readonly notificationsService: NotificationsService,
     private readonly auditService: AuditService,
     private readonly photoStorageService: PhotoStorageService,
@@ -95,14 +93,6 @@ export class AuthService {
     // 2. Validate Password Rules
     this.validatePasswordRules(dto.password);
 
-    // 3. Verify Visual CAPTCHA
-    const captchaResult = this.captchaService.verifyCaptcha(dto.captchaId, dto.captchaAnswer);
-    if (!captchaResult.success) {
-      throw new UnauthorizedException(
-        captchaResult.error || 'Incorrect CAPTCHA. Please try again.',
-      );
-    }
-
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(dto.password, saltRounds);
 
@@ -128,50 +118,58 @@ export class AuthService {
         } else {
           buffer = Buffer.from(dto.profilePhotoBase64, 'base64');
         }
+
         profilePhoto = await this.photoStorageService.storeProfilePhoto(
           buffer,
-          `reg_${dto.phone || Date.now()}.jpg`,
+          `reg_${Date.now()}.jpg`,
           mimeType,
         );
       } catch (err: any) {
-        this.logger.warn(`Photo storage fallback during registration: ${err.message}`);
-        profilePhoto = {
-          url: dto.profilePhotoUrl || '/images/avatars/default.svg',
-          mimeType: 'image/svg+xml',
-          size: 0,
-          uploadedAt: new Date(),
-        };
+        this.logger.warn(`Failed to process registration profile photo: ${err.message}`);
+        if (dto.profilePhotoUrl) {
+          profilePhoto = { url: dto.profilePhotoUrl };
+        }
       }
     } else if (dto.profilePhotoUrl) {
-      profilePhoto = {
-        url: dto.profilePhotoUrl,
-        mimeType: 'image/svg+xml',
-        size: 0,
-        uploadedAt: new Date(),
-      };
+      profilePhoto = { url: dto.profilePhotoUrl };
     }
 
-    const userId = `usr-${Date.now()}`;
-    const userData: Partial<User> = {
+    // Build unique ID
+    const rolePrefix = dto.role === Role.FARMER ? 'usr-farmer' : 'usr-buyer';
+    const userId = `${rolePrefix}-${Date.now()}`;
+
+    // Duplicate Check
+    const existingPhone = await this.userModel.findOne({ phone: dto.phone }).lean();
+    if (existingPhone) {
+      throw new ConflictException('A user with this mobile number is already registered.');
+    }
+
+    if (dto.email) {
+      const existingEmail = await this.userModel.findOne({ email: dto.email }).lean();
+      if (existingEmail) {
+        throw new ConflictException('A user with this email address is already registered.');
+      }
+    }
+
+    const userData: any = {
       _id: userId,
       name: dto.name,
       phone: dto.phone,
       email: dto.email || null,
       passwordHash,
       role: dto.role,
-      verificationStatus: VerificationStatus.PENDING,
       approvalStatus: ApprovalStatus.PENDING,
+      verificationStatus: VerificationStatus.PENDING,
       rejectionReason: null,
-      approvedBy: null,
-      approvedAt: null,
-      profilePhoto,
-      district: dto.district,
+      isVerified: false,
       state: dto.state,
+      district: dto.district,
       village: dto.village || null,
-      location: dto.location || null,
-      geoPoint,
+      location: dto.location || `${dto.district}, ${dto.state}`,
+      geoPoint: geoPoint || null,
+      profilePhoto: profilePhoto || null,
       primaryCrop: dto.primaryCrop || null,
-      farmSize: dto.farmSize ? Number(dto.farmSize) : null,
+      farmSize: dto.farmSize || null,
       preferredLanguage: dto.preferredLanguage || 'en',
       organization: dto.organization || null,
       contactPerson: dto.contactPerson || null,
@@ -181,22 +179,9 @@ export class AuthService {
       fssai: dto.fssai || null,
       kccNumber: dto.kccNumber || null,
       apmcLicense: dto.apmcLicense || null,
-      isVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
-
-    if (dto.phone) {
-      const existingPhone = await this.userModel.findOne({ phone: dto.phone }).lean();
-      if (existingPhone) {
-        throw new ConflictException('Mobile number is already registered.');
-      }
-    }
-
-    if (dto.email) {
-      const existingEmail = await this.userModel.findOne({ email: dto.email }).lean();
-      if (existingEmail) {
-        throw new ConflictException('Email address is already registered.');
-      }
-    }
 
     await this.userModel.create(userData);
     this.logger.log(`Created new MongoDB user: ${userId} (${dto.name})`);
@@ -242,15 +227,7 @@ export class AuthService {
     const rateLimitKey = remoteIp || dto.identifier || 'anonymous';
     this.checkRateLimit(rateLimitKey);
 
-    // 1. Verify Visual Alphanumeric CAPTCHA challenge
-    const captchaResult = this.captchaService.verifyCaptcha(dto.captchaId, dto.captchaAnswer);
-    if (!captchaResult.success) {
-      throw new UnauthorizedException(
-        captchaResult.error || 'Incorrect CAPTCHA. Please try again.',
-      );
-    }
-
-    // 2. MongoDB Lookup
+    // 1. MongoDB Lookup
     const user = await this.userModel
       .findOne({
         $or: [{ phone: dto.identifier }, { email: dto.identifier }],
@@ -278,49 +255,77 @@ export class AuthService {
       );
     }
 
-    // Approval Status Check
-    if (user.approvalStatus === ApprovalStatus.PENDING) {
+    // Verification / Approval Gate
+    const approvalStatus = user.approvalStatus || ApprovalStatus.APPROVED;
+
+    if (approvalStatus === ApprovalStatus.PENDING) {
       throw new ForbiddenException(
-        'Your account is awaiting admin approval. You will be able to sign in once an administrator approves your registration.',
+        'Your registration is currently PENDING_APPROVAL by the administrator. Please wait for verification.',
       );
     }
 
-    if (user.approvalStatus === ApprovalStatus.REJECTED) {
-      throw new ForbiddenException(
-        `Your registration was rejected. Reason: ${user.rejectionReason || 'Application did not meet verification criteria.'}`,
-      );
+    if (approvalStatus === ApprovalStatus.REJECTED) {
+      const reason = user.rejectionReason || 'Application details could not be verified.';
+      throw new ForbiddenException(`Your registration was rejected by the administrator. Reason: ${reason}`);
     }
 
-    const completion = computeProfileCompletion(user);
-    const userId = user._id || (user as any).id;
-    const payload = { sub: userId, role: user.role, name: user.name };
+    const payload = {
+      sub: user._id,
+      phone: user.phone,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      district: user.district,
+      state: user.state,
+      approvalStatus: user.approvalStatus,
+      verificationStatus: user.verificationStatus,
+    };
+
     const accessToken = this.jwtService.sign(payload);
+    const completion = computeProfileCompletion(user);
 
     return {
       accessToken,
       user: {
-        id: userId,
+        id: user._id,
         name: user.name,
-        phone: user.phone,
-        email: user.email,
+        phone: user.phone || null,
+        email: user.email || null,
         role: user.role,
-        profilePhoto: user.profilePhoto,
-        district: user.district,
-        state: user.state,
-        village: user.village,
-        location: user.location,
-        geoPoint: user.geoPoint,
-        organization: user.organization,
-        contactPerson: user.contactPerson,
-        businessType: user.businessType,
-        warehouseLocation: user.warehouseLocation,
-        gstin: user.gstin,
-        fssai: user.fssai,
-        kccNumber: user.kccNumber,
-        apmcLicense: user.apmcLicense,
-        isVerified: user.isVerified,
-        ...completion,
+        district: user.district || null,
+        state: user.state || null,
+        village: user.village || null,
+        location: user.location || null,
+        geoPoint: user.geoPoint || null,
+        profilePhoto: user.profilePhoto || null,
+        isVerified: user.isVerified || false,
+        approvalStatus: user.approvalStatus || ApprovalStatus.APPROVED,
+        verificationStatus: user.verificationStatus || VerificationStatus.VERIFIED,
+        rejectionReason: user.rejectionReason || null,
+        primaryCrop: user.primaryCrop || null,
+        farmSize: user.farmSize || null,
+        preferredLanguage: user.preferredLanguage || 'en',
+        organization: user.organization || null,
+        contactPerson: user.contactPerson || null,
+        businessType: user.businessType || null,
+        warehouseLocation: user.warehouseLocation || null,
+        gstin: user.gstin || null,
+        fssai: user.fssai || null,
+        kccNumber: user.kccNumber || null,
+        apmcLicense: user.apmcLicense || null,
+        profileCompletionPercentage: completion.profileCompletionPercentage,
+        profileCompletionStatus: completion.profileCompletionStatus,
+        missingFields: completion.missingFields,
       },
     };
+  }
+
+  async validateToken(token: string) {
+    try {
+      const payload = this.jwtService.verify(token);
+      return payload;
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token.');
+    }
   }
 }

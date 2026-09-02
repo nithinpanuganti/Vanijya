@@ -3,12 +3,12 @@
 
 ---
 
-## 1. Authentication & Security Verification
+## 1. Authentication & User Verification
 
 | Method | Endpoint | Description | Role / Auth |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/auth/captcha` | **Visual Alphanumeric CAPTCHA:** Generates distorted SVG security image + challenge ID | Public |
-| `POST` | `/auth/login` | Authenticate with phone/email, password, and CAPTCHA challenge answer $\rightarrow$ returns JWT | Public |
+| `POST` | `/auth/register` | Register a new Farmer or Buyer with KYC, GPS location & photo dossier $\rightarrow$ creates `PENDING` user | Public |
+| `POST` | `/auth/login` | Authenticate with phone/email and password $\rightarrow$ returns JWT upon admin approval | Public |
 | `GET` | `/auth/me` | Fetch authenticated user profile and verification status | Bearer JWT |
 | `GET` | `/users/me` | Retrieve profile details | Bearer JWT |
 | `PATCH` | `/users/me` | Update name, district, state, location | Bearer JWT |
@@ -86,9 +86,8 @@
 
 ---
 
-## 8. Demo & Simulation
+## 8. System & Health Diagnostics
 
 | Method | Endpoint | Description | Role / Auth |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/demo/reset` | **1-Click Demo Reset:** Restores database state to baseline for judges | Public / Demo |
-| `GET` | `/health` | Server heartbeat and system status | Public |
+| `GET` | `/health` | Real-time backend and MongoDB database readiness heartbeat | Public |

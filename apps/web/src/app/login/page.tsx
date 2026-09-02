@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
 import { useLanguage } from '../../lib/language-context';
 import { useToast } from '../../components/ui/toast';
-import { Captcha, CaptchaHandle } from '../../components/security/captcha';
 import {
   LogIn,
   ShieldCheck,
@@ -30,7 +29,6 @@ export default function UnifiedLoginPage() {
   const { login, isAuthenticated, user } = useAuth();
   const { t } = useLanguage();
   const { showToast } = useToast();
-  const captchaRef = useRef<CaptchaHandle>(null);
 
   const [identifier, setIdentifier] = useState('9876543210');
   const [password, setPassword] = useState('Farmer@123');
@@ -39,12 +37,6 @@ export default function UnifiedLoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<'GENERAL' | 'PENDING' | 'REJECTED'>('GENERAL');
-
-  // Visual Alphanumeric CAPTCHA state
-  const [captchaData, setCaptchaData] = useState<{ captchaId: string; captchaAnswer: string }>({
-    captchaId: '',
-    captchaAnswer: '',
-  });
 
   if (isAuthenticated && user) {
     return (
@@ -97,12 +89,6 @@ export default function UnifiedLoginPage() {
       setErrorType('GENERAL');
       return;
     }
-    if (!captchaData.captchaAnswer || captchaData.captchaAnswer.trim() === '') {
-      setErrorMessage(t.errCaptchaRequired);
-      setErrorType('GENERAL');
-      showToast(t.errCaptchaRequired, 'error');
-      return;
-    }
 
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -113,8 +99,6 @@ export default function UnifiedLoginPage() {
         identifier.trim(),
         password,
         selectedRole,
-        captchaData.captchaId,
-        captchaData.captchaAnswer.trim().toUpperCase(),
       );
       showToast(`${t.commonWelcomeBack}, ${loggedInUser.name}!`, 'success');
       router.push('/dashboard');
@@ -129,14 +113,6 @@ export default function UnifiedLoginPage() {
       } else if (rawMsg.toLowerCase().includes('rejected')) {
         msg = rawMsg;
         type = 'REJECTED';
-      } else if (rawMsg.toLowerCase().includes('captcha') || rawMsg.toLowerCase().includes('security')) {
-        if (rawMsg.toLowerCase().includes('expired')) {
-          msg = t.errCaptchaExpired;
-        } else if (rawMsg.toLowerCase().includes('too many')) {
-          msg = t.errTooManyAttempts;
-        } else {
-          msg = t.errCaptchaInvalid;
-        }
       } else if (rawMsg.toLowerCase().includes('registered as') || rawMsg.toLowerCase().includes('account type')) {
         msg = rawMsg;
       }
@@ -144,19 +120,12 @@ export default function UnifiedLoginPage() {
       setErrorMessage(msg);
       setErrorType(type);
       showToast(msg, 'error');
-
-      // Refresh CAPTCHA challenge for security
-      captchaRef.current?.refresh();
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const isLoginDisabled =
-    isSubmitting ||
-    !identifier.trim() ||
-    !password.trim() ||
-    !captchaData.captchaAnswer.trim();
+  const isLoginDisabled = isSubmitting || !identifier.trim() || !password.trim();
 
   return (
     <div className="max-w-md mx-auto space-y-5 animate-in fade-in duration-300">
@@ -270,13 +239,6 @@ export default function UnifiedLoginPage() {
               </button>
             </div>
           </div>
-
-          {/* Visual Alphanumeric CAPTCHA Security Verification */}
-          <Captcha
-            ref={captchaRef}
-            onCaptchaChange={setCaptchaData}
-            disabled={isSubmitting}
-          />
 
           {/* Sign In Button */}
           <button
