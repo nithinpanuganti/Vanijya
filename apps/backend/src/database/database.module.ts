@@ -1,4 +1,5 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, Logger } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DatabaseService } from './database.service';
 import {
@@ -24,14 +25,57 @@ import {
   AuditLogSchema,
 } from './schemas';
 
-const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/vanijya_db';
+export function sanitizeMongoUri(uri?: string): string {
+  if (!uri) return '<missing>';
+  try {
+    return uri.replace(/(mongodb(?:\+srv)?:\/\/)([^:]+):([^@]+)@/i, '$1***:***@');
+  } catch {
+    return '***';
+  }
+}
 
 @Global()
 @Module({
   imports: [
-    MongooseModule.forRoot(uri, {
-      serverSelectionTimeoutMS: 2000,
-      connectTimeoutMS: 2000,
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const uri = configService.get<string>('MONGODB_URI') || process.env.MONGODB_URI;
+
+        if (!uri || uri.trim() === '') {
+          const errorMsg =
+            'MONGODB_URI is not configured. Create apps/backend/.env from .env.example and provide a valid MongoDB connection string.';
+          Logger.error(`\n❌ [Database Configuration Error]\n${errorMsg}\n`, 'DatabaseModule');
+          throw new Error(errorMsg);
+        }
+
+        const sanitized = sanitizeMongoUri(uri);
+        Logger.log(`🍃 Connecting to MongoDB at: ${sanitized}`, 'DatabaseModule');
+
+        return {
+          uri,
+          serverSelectionTimeoutMS: 5000,
+          connectTimeoutMS: 5000,
+          retryAttempts: 2,
+          retryDelay: 1000,
+          connectionFactory: (connection) => {
+            connection.on('connected', () => {
+              Logger.log(`🍃 MongoDB connected successfully (${sanitized})`, 'DatabaseModule');
+            });
+            connection.on('error', (err: any) => {
+              Logger.error(
+                `❌ MongoDB connection failed: ${err.message || err}. Ensure your MongoDB service is running and accessible at ${sanitized}.`,
+                'DatabaseModule',
+              );
+            });
+            connection.on('disconnected', () => {
+              Logger.warn('⚠️ MongoDB disconnected.', 'DatabaseModule');
+            });
+            return connection;
+          },
+        };
+      },
     }),
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },

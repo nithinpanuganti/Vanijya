@@ -14,7 +14,6 @@ import {
   UserDocument,
   Role,
 } from '../database/schemas';
-import { FALLBACK_TRANSACTIONS } from '../bids/bids.service';
 
 @Injectable()
 export class TransactionsService {
@@ -29,86 +28,96 @@ export class TransactionsService {
   ) {}
 
   async findAll(userId: string, role: Role) {
-    try {
-      const filter: any = {};
-      if (role === Role.FARMER) filter.farmerId = userId;
-      if (role === Role.BUYER) filter.buyerId = userId;
+    const filter: any = {};
+    if (role === Role.FARMER) filter.farmerId = userId;
+    if (role === Role.BUYER) filter.buyerId = userId;
 
-      const txns = await this.transactionModel.find(filter).sort({ createdAt: -1 }).lean();
-      if (txns && txns.length > 0) {
-        const lots = await this.cropLotModel.find().lean();
-        const crops = await this.cropModel.find().lean();
-        const users = await this.userModel.find().lean();
-        const payments = await this.paymentModel.find().lean();
+    const txns = await this.transactionModel.find(filter).sort({ createdAt: -1 }).lean();
+    if (!txns || txns.length === 0) return [];
 
-        const lotMap = new Map(lots.map((l) => [l._id, l]));
-        const cropMap = new Map(crops.map((c) => [c._id, c]));
-        const userMap = new Map(users.map((u) => [u._id, u]));
-        const paymentMap = new Map(payments.map((p) => [p.transactionId, p]));
+    const lots = await this.cropLotModel.find().lean();
+    const crops = await this.cropModel.find().lean();
+    const users = await this.userModel.find().lean();
+    const payments = await this.paymentModel.find().lean();
 
-        return txns.map((t) => {
-          const lot = lotMap.get(t.lotId);
-          const crop = lot ? cropMap.get(lot.cropId) : null;
-          const buyer = userMap.get(t.buyerId);
-          const farmer = userMap.get(t.farmerId);
-          const payment = paymentMap.get(t._id);
+    const lotMap = new Map(lots.map((l) => [l._id, l]));
+    const cropMap = new Map(crops.map((c) => [c._id, c]));
+    const userMap = new Map(users.map((u) => [u._id, u]));
+    const paymentMap = new Map(payments.map((p) => [p.transactionId, p]));
 
-          return {
-            ...t,
-            id: t._id,
-            lot: lot ? { ...lot, id: lot._id, crop: crop || { name: 'Produce' } } : null,
-            buyer: buyer ? { name: buyer.name, district: buyer.district, state: buyer.state, phone: buyer.phone, email: buyer.email } : { name: 'Buyer' },
-            farmer: farmer ? { name: farmer.name, district: farmer.district, state: farmer.state, phone: farmer.phone } : { name: 'Farmer' },
-            payment: payment ? { ...payment, id: payment._id } : null,
-          };
-        });
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB findAll transactions fallback: ${err.message}`);
-    }
+    return txns.map((t) => {
+      const lot = lotMap.get(t.lotId);
+      const crop = lot ? cropMap.get(lot.cropId) : null;
+      const buyer = userMap.get(t.buyerId);
+      const farmer = userMap.get(t.farmerId);
+      const payment = paymentMap.get(t._id);
 
-    if (role === Role.FARMER) {
-      return FALLBACK_TRANSACTIONS.filter((t) => t.farmerId === userId);
-    }
-    if (role === Role.BUYER) {
-      return FALLBACK_TRANSACTIONS.filter((t) => t.buyerId === userId);
-    }
-    return FALLBACK_TRANSACTIONS;
+      return {
+        ...t,
+        id: t._id,
+        lot: lot ? { ...lot, id: lot._id, crop: crop || { name: 'Produce' } } : null,
+        buyer: buyer
+          ? {
+              name: buyer.name,
+              district: buyer.district,
+              state: buyer.state,
+              phone: buyer.phone,
+              email: buyer.email,
+            }
+          : { name: 'Buyer' },
+        farmer: farmer
+          ? {
+              name: farmer.name,
+              district: farmer.district,
+              state: farmer.state,
+              phone: farmer.phone,
+            }
+          : { name: 'Farmer' },
+        payment: payment ? { ...payment, id: payment._id } : null,
+      };
+    });
   }
 
   async findOne(id: string, userId: string, role: Role) {
-    try {
-      const transaction = await this.transactionModel.findById(id).lean();
-      if (transaction) {
-        if (role !== Role.ADMIN && transaction.farmerId !== userId && transaction.buyerId !== userId) {
-          throw new ForbiddenException('You are not authorized to view this transaction.');
-        }
-
-        const lot = await this.cropLotModel.findById(transaction.lotId).lean();
-        const crop = lot ? await this.cropModel.findById(lot.cropId).lean() : null;
-        const buyer = await this.userModel.findById(transaction.buyerId).lean();
-        const farmer = await this.userModel.findById(transaction.farmerId).lean();
-        const payment = await this.paymentModel.findOne({ transactionId: transaction._id }).lean();
-
-        return {
-          ...transaction,
-          id: transaction._id,
-          lot: lot ? { ...lot, id: lot._id, crop: crop || { name: 'Produce' } } : null,
-          buyer: buyer ? { name: buyer.name, district: buyer.district, phone: buyer.phone, email: buyer.email } : { name: 'Buyer' },
-          farmer: farmer ? { name: farmer.name, district: farmer.district, phone: farmer.phone } : { name: 'Farmer' },
-          payment: payment ? { ...payment, id: payment._id } : null,
-        };
-      }
-    } catch (err: any) {
-      if (err instanceof ForbiddenException) throw err;
-      this.logger.warn(`MongoDB findOne transaction fallback for ${id}: ${err.message}`);
+    const transaction = await this.transactionModel.findById(id).lean();
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with ID ${id} not found.`);
     }
 
-    const txn = FALLBACK_TRANSACTIONS.find((t) => t.id === id || t._id === id);
-    if (!txn) throw new NotFoundException(`Transaction with ID ${id} not found.`);
-    if (role !== Role.ADMIN && txn.farmerId !== userId && txn.buyerId !== userId) {
+    if (
+      role !== Role.ADMIN &&
+      transaction.farmerId !== userId &&
+      transaction.buyerId !== userId
+    ) {
       throw new ForbiddenException('You are not authorized to view this transaction.');
     }
-    return { ...txn, id: txn._id || txn.id };
+
+    const lot = await this.cropLotModel.findById(transaction.lotId).lean();
+    const crop = lot ? await this.cropModel.findById(lot.cropId).lean() : null;
+    const buyer = await this.userModel.findById(transaction.buyerId).lean();
+    const farmer = await this.userModel.findById(transaction.farmerId).lean();
+    const payment = await this.paymentModel.findOne({ transactionId: transaction._id }).lean();
+
+    return {
+      ...transaction,
+      id: transaction._id,
+      lot: lot ? { ...lot, id: lot._id, crop: crop || { name: 'Produce' } } : null,
+      buyer: buyer
+        ? {
+            name: buyer.name,
+            district: buyer.district,
+            phone: buyer.phone,
+            email: buyer.email,
+          }
+        : { name: 'Buyer' },
+      farmer: farmer
+        ? {
+            name: farmer.name,
+            district: farmer.district,
+            phone: farmer.phone,
+          }
+        : { name: 'Farmer' },
+      payment: payment ? { ...payment, id: payment._id } : null,
+    };
   }
 }

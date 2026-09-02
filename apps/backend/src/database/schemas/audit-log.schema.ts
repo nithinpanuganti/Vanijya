@@ -15,14 +15,26 @@ export class AuditLog {
   @Prop({ type: String, default: null, ref: 'CropLot' })
   lotId?: string;
 
+  @Prop({ type: String, default: null, ref: 'Transaction' })
+  transactionId?: string;
+
+  @Prop({ type: String, default: null, ref: 'Payment' })
+  paymentId?: string;
+
   @Prop({ type: String, required: true, ref: 'User' })
   actorId: string;
+
+  @Prop({ type: String, default: 'FARMER' })
+  actorRole?: string;
 
   @Prop({ type: String, enum: AuditAction, required: true })
   action: AuditAction;
 
   @Prop({ type: Number, default: null })
   oldQuantity?: number;
+
+  @Prop({ type: Number, default: null })
+  previousQuantity?: number;
 
   @Prop({ type: Number, default: null })
   newQuantity?: number;
@@ -39,6 +51,9 @@ export class AuditLog {
   @Prop({ type: MongooseSchema.Types.Mixed, default: null })
   metadata?: any;
 
+  @Prop({ type: Date, default: Date.now })
+  timestamp?: Date;
+
   createdAt: Date;
 }
 
@@ -49,3 +64,4 @@ AuditLogSchema.index({ lotId: 1 });
 AuditLogSchema.index({ bidId: 1 });
 AuditLogSchema.index({ action: 1 });
 AuditLogSchema.index({ createdAt: -1 });
+AuditLogSchema.index({ timestamp: -1 });

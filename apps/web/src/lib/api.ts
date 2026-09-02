@@ -7,8 +7,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('vanijya_token') : null;
+  const timeoutMs = options.timeoutMs ?? 10000; // 10s default timeout
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -18,11 +23,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(url, {
       ...options,
       headers,
+      signal: options.signal || controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       let errorMessage = `HTTP Error ${response.status}`;
@@ -42,27 +53,41 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     return await response.json();
   } catch (error: any) {
+    clearTimeout(timeoutId);
+
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(0, error.message || 'Network connection failed. Please verify the backend is running.');
+
+    if (error.name === 'AbortError') {
+      throw new ApiError(
+        408,
+        'Server request timed out. Please check if the Vanijya backend is running and try again.',
+      );
+    }
+
+    throw new ApiError(
+      0,
+      'Unable to connect to the backend server. Please verify the backend is running and check your connection.',
+    );
   }
 }
 
 export const api = {
-  get: <T>(endpoint: string, options?: RequestInit) => request<T>(endpoint, { method: 'GET', ...options }),
-  post: <T>(endpoint: string, data?: any, options?: RequestInit) =>
+  get: <T>(endpoint: string, options?: RequestOptions) =>
+    request<T>(endpoint, { method: 'GET', ...options }),
+  post: <T>(endpoint: string, data?: any, options?: RequestOptions) =>
     request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
       ...options,
     }),
-  patch: <T>(endpoint: string, data?: any, options?: RequestInit) =>
+  patch: <T>(endpoint: string, data?: any, options?: RequestOptions) =>
     request<T>(endpoint, {
       method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
       ...options,
     }),
-  delete: <T>(endpoint: string, options?: RequestInit) =>
+  delete: <T>(endpoint: string, options?: RequestOptions) =>
     request<T>(endpoint, { method: 'DELETE', ...options }),
 };

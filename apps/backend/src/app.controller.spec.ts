@@ -1,25 +1,58 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { DatabaseService } from './database/database.service';
 
 describe('AppController', () => {
   let appController: AppController;
+  let mockDatabaseService: any;
 
   beforeEach(async () => {
+    mockDatabaseService = {
+      connection: { readyState: 1 },
+      isConnected: true,
+    };
+
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        AppService,
+        {
+          provide: DatabaseService,
+          useValue: mockDatabaseService,
+        },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
   });
 
   describe('getHealth', () => {
-    it('should return system status ok', () => {
-      const health = appController.getHealth();
-      expect(health.status).toBe('ok');
-      expect(health.service).toBe('vanijya-backend');
-      expect(health.sihProblemStatement).toContain('26132');
+    it('should return system status ok when database is connected', () => {
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockImplementation((data) => data),
+      };
+
+      const result: any = appController.getHealth(mockRes);
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(result.status).toBe('ok');
+      expect(result.database).toBe('connected');
+      expect(result.service).toBe('vanijya-backend');
+      expect(result.sihProblemStatement).toContain('26132');
+    });
+
+    it('should return 503 degraded status when database is disconnected', () => {
+      mockDatabaseService.connection.readyState = 0;
+      const mockRes: any = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockImplementation((data) => data),
+      };
+
+      const result: any = appController.getHealth(mockRes);
+      expect(mockRes.status).toHaveBeenCalledWith(503);
+      expect(result.status).toBe('degraded');
+      expect(result.database).toBe('disconnected');
     });
   });
 });

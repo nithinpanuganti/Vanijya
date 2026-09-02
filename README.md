@@ -6,7 +6,7 @@
 ---
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
-[![Tests](https://img.shields.io/badge/Tests-66%2F66%20Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
+[![Tests](https://img.shields.io/badge/Tests-67%2F67%20Passing-brightgreen?style=for-the-badge)](https://github.com/nithinpanuganti/Vanijya)
 [![Database](https://img.shields.io/badge/Database-MongoDB%20%2B%20GridFS-green?style=for-the-badge&logo=mongodb)](https://github.com/nithinpanuganti/Vanijya)
 [![Security](https://img.shields.io/badge/CAPTCHA-Visual%20Alphanumeric%20SVG-orange?style=for-the-badge&logo=shield)](https://github.com/nithinpanuganti/Vanijya)
 [![Workflow](https://img.shields.io/badge/Verification-Admin%20Approval%20Workflow-emerald?style=for-the-badge&logo=checkmarx)](https://github.com/nithinpanuganti/Vanijya)
@@ -54,7 +54,7 @@
   - **Farmers**: Primary Crop, Farm Size (Acres), KCC Number, APMC License.
   - **Buyers**: Organization, Contact Person, Business Type, Warehouse Location, GSTIN, FSSAI License.
   - **Live Password Strength Meter**: 5-point evaluation verifying 8+ characters, uppercase, lowercase, number, and special character rules.
-  - **Visual Alphanumeric CAPTCHA**: Direct SVG challenge verification.
+  - **Visual Alphanumeric CAPTCHA**: Direct SVG challenge verification with connection timeout handling and retry button.
 - **Step 5: Registration Confirmation Screen**: Displays 🟡 **Pending Admin Verification**.
 - **Login Enforcement**:
   - `PENDING` accounts are blocked with an approval status notification.
@@ -93,8 +93,8 @@
 ### 7. 🌐 Trilingual Internationalization (i18n)
 - 1-click instantaneous switching between **English**, **हिंदी (Hindi)**, and **తెలుగు (Telugu)** across all 17 routes, status badges, forms, and validation prompts.
 
-### 8. 🍃 Modern MongoDB Data Layer & 100% Offline Resiliency
-- Robust Mongoose schemas with 2dsphere indexing, GridFS streaming bucket, atomic multi-document transaction handling, and auto-seeding demo data with zero-downtime in-memory fallback.
+### 8. 🍃 Modern MongoDB Data Layer (Local or Atlas)
+- Robust Mongoose schemas with 2dsphere indexing, GridFS streaming bucket, atomic multi-document transaction handling, and auto-seeding demo data on fresh environment startup.
 
 ---
 
@@ -112,6 +112,7 @@
 | **Marketplace Catalog** | [**http://localhost:3000/browse-lots**](http://localhost:3000/browse-lots) | Sourcing lots with live procurement value calculation |
 | **Profile Management** | [**http://localhost:3000/profile**](http://localhost:3000/profile) | Identity photo, GPS location, and KYC completion gauge |
 | **Backend API & Swagger Docs** | [**http://localhost:4000/api/docs**](http://localhost:4000/api/docs) | 34 NestJS REST APIs & Swagger interactive docs |
+| **Backend Health Check** | [**http://localhost:4000/api/health**](http://localhost:4000/api/health) | Backend & MongoDB connection readiness status |
 
 ---
 
@@ -127,49 +128,72 @@ On the unified login page ([`http://localhost:3000/login`](http://localhost:3000
 
 ---
 
-## 🚀 Local Development Setup
+## 🚀 Fresh Machine Setup Guide
 
-### 1. Prerequisites
-- **Node.js**: v18 or v20+ LTS
-- **MongoDB**: Local MongoDB instance (e.g. `mongodb://localhost:27017/vanijya`) or MongoDB Atlas
-- **npm**: v9 or v10+
+Follow these simple steps to run Vanijya on a new or cloned machine:
 
-### 2. Installation
+### STEP 1: Install Node.js
+Ensure **Node.js (v18 or v20+ LTS)** and **npm (v9 or v10+)** are installed on your machine.
+Verify with: `node -v` and `npm -v`.
+
+### STEP 2: Install / Start MongoDB or Create MongoDB Atlas Cluster
+- **Local MongoDB**: Ensure your local MongoDB daemon is running (default port `27017`).
+- **MongoDB Atlas**: Create a free cloud cluster and get your connection URI.
+
+### STEP 3: Clone Repository
 ```bash
-# Clone the repository
 git clone https://github.com/nithinpanuganti/Vanijya.git
 cd Vanijya
-
-# Install all workspace dependencies
-npm install
-
-# Build shared packages
-npm run build:packages
 ```
 
-### 3. Running the Application
-
-#### Option A: 1-Click Desktop Launcher on Windows (Recommended)
-Double-click `start-vanijya.bat` in the root directory.
-
-#### Option B: Terminal Commands
-Run the Backend and Frontend in separate terminals:
-
+### STEP 4: Install Dependencies
 ```bash
-# Terminal 1: Start Backend API (Port 4000)
-npm run start:dev --workspace=apps/backend
-
-# Terminal 2: Start Unified Web Portal (Port 3000)
-npm run dev
+npm install
 ```
 
-The portal will be available at [http://localhost:3000](http://localhost:3000) and API documentation at [http://localhost:4000/api/docs](http://localhost:4000/api/docs).
+### STEP 5: Create Backend Environment File
+Copy the provided template to create your `.env` file:
+```bash
+cp apps/backend/.env.example apps/backend/.env
+```
+*(On Windows Command Prompt: `copy apps\backend\.env.example apps\backend\.env`)*
+
+### STEP 6: Configure `MONGODB_URI`
+Open `apps/backend/.env` and set your MongoDB connection string:
+```env
+# Local MongoDB example:
+MONGODB_URI=mongodb://127.0.0.1:27017/vanijya
+
+# OR MongoDB Atlas example:
+# MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/vanijya?retryWrites=true&w=majority
+
+JWT_SECRET=vanijya_super_secret_jwt_key_sih2026_national_trade
+JWT_EXPIRES_IN=7d
+PORT=4000
+NODE_ENV=development
+```
+
+### STEP 7: Automatic Initial Seeding
+When the backend starts and detects an empty database, it automatically seeds all demo accounts (Farmers, Buyers, Admin), crops, markets, prices, lots, bids, and notifications.
+
+### STEP 8: Start Backend API
+```bash
+npm run start:dev --workspace=apps/backend
+```
+*Backend runs on [http://localhost:4000/api](http://localhost:4000/api) with Swagger at [http://localhost:4000/api/docs](http://localhost:4000/api/docs).*
+
+### STEP 9: Start Unified Web Portal
+In a new terminal:
+```bash
+npm run dev --workspace=apps/web
+```
+*Unified Web Portal opens at [http://localhost:3000](http://localhost:3000).*
 
 ---
 
 ## 🧪 Automated Testing
 
-All **66 automated unit, integration, and end-to-end transaction loop tests** pass with 100% success rate:
+All **67 automated unit, integration, and end-to-end transaction loop tests** pass with 100% success rate:
 ```bash
 npm test --workspace=@vanijya/backend
 ```
@@ -177,19 +201,19 @@ npm test --workspace=@vanijya/backend
 ```
 PASS src/e2e-live-loop.spec.ts
 PASS src/prices/services/price-analytics.service.spec.ts
-PASS src/app.controller.spec.ts
 PASS src/auth/captcha.service.spec.ts
 PASS src/notifications/notifications.service.spec.ts
-PASS src/bids/bids.service.spec.ts
-PASS src/admin/admin.service.spec.ts
 PASS src/prices/prices.service.spec.ts
-PASS src/auth/auth.service.spec.ts
 PASS src/lots/lots.service.spec.ts
+PASS src/app.controller.spec.ts
+PASS src/auth/auth.service.spec.ts
+PASS src/admin/admin.service.spec.ts
+PASS src/bids/bids.service.spec.ts
 
 Test Suites: 10 passed, 10 total
-Tests:       66 passed, 66 total
+Tests:       67 passed, 67 total
 Snapshots:   0 total
-Time:        12.1 s
+Time:        11.5 s
 ```
 
 ---

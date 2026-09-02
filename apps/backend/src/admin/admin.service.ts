@@ -25,9 +25,6 @@ import {
   VerificationStatus,
   NotificationType,
 } from '../database/schemas';
-import { FALLBACK_LOTS } from '../lots/lots.service';
-import { FALLBACK_BIDS, FALLBACK_TRANSACTIONS, FALLBACK_PAYMENTS } from '../bids/bids.service';
-import { FALLBACK_USERS, AuthService } from '../auth/auth.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -45,111 +42,20 @@ export class AdminService {
     @InjectModel(AuditLog.name) private readonly auditLogModel: Model<AuditLogDocument>,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
-    private readonly authService: AuthService,
   ) {}
 
   async getDashboardStats() {
     const recentActivity = await this.auditService.getRecent(10);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-    try {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const [
-        totalFarmers,
-        totalBuyers,
-        pendingFarmers,
-        pendingBuyers,
-        approvedToday,
-        rejectedToday,
-        activeLots,
-        activeBiddingLots,
-        soldLots,
-        cancelledLots,
-        pendingBids,
-        acceptedBids,
-        cancelledBids,
-        transactions,
-        payments,
-      ] = await Promise.all([
-        this.userModel.countDocuments({ role: Role.FARMER }),
-        this.userModel.countDocuments({ role: Role.BUYER }),
-        this.userModel.countDocuments({ role: Role.FARMER, approvalStatus: ApprovalStatus.PENDING }),
-        this.userModel.countDocuments({ role: Role.BUYER, approvalStatus: ApprovalStatus.PENDING }),
-        this.userModel.countDocuments({ approvalStatus: ApprovalStatus.APPROVED, approvedAt: { $gte: todayStart } }),
-        this.userModel.countDocuments({ approvalStatus: ApprovalStatus.REJECTED, updatedAt: { $gte: todayStart } }),
-        this.cropLotModel.countDocuments({ status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] } }),
-        this.cropLotModel.countDocuments({ status: CropLotStatus.BIDDING }),
-        this.cropLotModel.countDocuments({ status: CropLotStatus.SOLD }),
-        this.cropLotModel.countDocuments({ status: CropLotStatus.CANCELLED }),
-        this.bidModel.countDocuments({ status: BidStatus.PENDING }),
-        this.bidModel.countDocuments({ status: BidStatus.ACCEPTED }),
-        this.bidModel.countDocuments({ status: BidStatus.WITHDRAWN }),
-        this.transactionModel.find().select('totalAmount').lean(),
-        this.paymentModel.find().select('amount status').lean(),
-      ]);
-
-      const modifiedBids = await this.auditLogModel.countDocuments({ action: AuditAction.QUANTITY_MODIFIED });
-      const totalTransactionValue = transactions.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
-      const completedPaymentsValue = payments
-        .filter((p) => p.status === PaymentStatus.PAID)
-        .reduce((acc, p) => acc + (p.amount || 0), 0);
-      const pendingPaymentsValue = payments
-        .filter((p) => p.status === PaymentStatus.PENDING)
-        .reduce((acc, p) => acc + (p.amount || 0), 0);
-
-      return {
-        totalFarmers,
-        totalBuyers,
-        pendingFarmers,
-        pendingBuyers,
-        approvedToday,
-        rejectedToday,
-        activeLots,
-        activeBiddingLots,
-        soldLots,
-        cancelledLots,
-        pendingBids,
-        acceptedBids,
-        cancelledBids,
-        modifiedBids,
-        totalTransactionValue,
-        pendingPaymentsValue,
-        completedPaymentsValue,
-        recentActivity,
-      };
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getDashboardStats fallback: ${err.message}`);
-    }
-
-    // In-memory fallback
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    const farmers = allUsers.filter((u) => u.role === Role.FARMER);
-    const buyers = allUsers.filter((u) => u.role === Role.BUYER);
-
-    const pendingFarmers = allUsers.filter((u) => u.role === Role.FARMER && u.approvalStatus === ApprovalStatus.PENDING).length;
-    const pendingBuyers = allUsers.filter((u) => u.role === Role.BUYER && u.approvalStatus === ApprovalStatus.PENDING).length;
-    const activeLots = FALLBACK_LOTS.filter((l) => l.status === CropLotStatus.OPEN || l.status === CropLotStatus.BIDDING).length;
-    const activeBiddingLots = FALLBACK_LOTS.filter((l) => l.status === CropLotStatus.BIDDING).length;
-    const soldLots = FALLBACK_LOTS.filter((l) => l.status === CropLotStatus.SOLD).length;
-    const cancelledLots = FALLBACK_LOTS.filter((l) => l.status === CropLotStatus.CANCELLED).length;
-
-    const pendingBids = FALLBACK_BIDS.filter((b) => b.status === BidStatus.PENDING).length;
-    const acceptedBids = FALLBACK_BIDS.filter((b) => b.status === BidStatus.ACCEPTED).length;
-    const cancelledBids = FALLBACK_BIDS.filter((b) => b.status === BidStatus.WITHDRAWN).length;
-    const modifiedBids = (await this.auditService.getRecent(100)).filter((a) => a.action === AuditAction.QUANTITY_MODIFIED).length;
-
-    const totalTransactionValue = FALLBACK_TRANSACTIONS.reduce((acc, t) => acc + (t.totalAmount || 0), 0) + (soldLots > 0 ? 174000 : 0);
-    const completedPaymentsValue = FALLBACK_PAYMENTS.filter((p) => p.status === PaymentStatus.PAID).reduce((acc, p) => acc + (p.amount || 0), 0) + (soldLots > 0 ? 174000 : 0);
-    const pendingPaymentsValue = FALLBACK_PAYMENTS.filter((p) => p.status === PaymentStatus.PENDING).reduce((acc, p) => acc + (p.amount || 0), 0);
-
-    return {
-      totalFarmers: farmers.length,
-      totalBuyers: buyers.length,
+    const [
+      totalFarmers,
+      totalBuyers,
       pendingFarmers,
       pendingBuyers,
-      approvedToday: allUsers.filter((u) => u.approvalStatus === ApprovalStatus.APPROVED).length,
-      rejectedToday: allUsers.filter((u) => u.approvalStatus === ApprovalStatus.REJECTED).length,
+      approvedToday,
+      rejectedToday,
       activeLots,
       activeBiddingLots,
       soldLots,
@@ -157,383 +63,443 @@ export class AdminService {
       pendingBids,
       acceptedBids,
       cancelledBids,
-      modifiedBids,
-      totalTransactionValue,
-      pendingPaymentsValue,
-      completedPaymentsValue,
+      transactions,
+      payments,
+    ] = await Promise.all([
+      this.userModel.countDocuments({ role: Role.FARMER }),
+      this.userModel.countDocuments({ role: Role.BUYER }),
+      this.userModel.countDocuments({ role: Role.FARMER, approvalStatus: ApprovalStatus.PENDING }),
+      this.userModel.countDocuments({ role: Role.BUYER, approvalStatus: ApprovalStatus.PENDING }),
+      this.userModel.countDocuments({
+        approvalStatus: ApprovalStatus.APPROVED,
+        approvedAt: { $gte: todayStart },
+      }),
+      this.userModel.countDocuments({
+        approvalStatus: ApprovalStatus.REJECTED,
+        updatedAt: { $gte: todayStart },
+      }),
+      this.cropLotModel.countDocuments({
+        status: { $in: [CropLotStatus.OPEN, CropLotStatus.BIDDING] },
+      }),
+      this.cropLotModel.countDocuments({ status: CropLotStatus.BIDDING }),
+      this.cropLotModel.countDocuments({ status: CropLotStatus.SOLD }),
+      this.cropLotModel.countDocuments({ status: CropLotStatus.CANCELLED }),
+      this.bidModel.countDocuments({ status: BidStatus.PENDING }),
+      this.bidModel.countDocuments({ status: BidStatus.ACCEPTED }),
+      this.bidModel.countDocuments({ status: BidStatus.WITHDRAWN }),
+      this.transactionModel.find().lean(),
+      this.paymentModel.find().lean(),
+    ]);
+
+    const totalTransactionValue = transactions.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
+    const completedPaymentsValue = payments
+      .filter((p) => p.status === PaymentStatus.PAID)
+      .reduce((acc, p) => acc + (p.amount || 0), 0);
+    const pendingPaymentsValue = payments
+      .filter((p) => p.status === PaymentStatus.PENDING)
+      .reduce((acc, p) => acc + (p.amount || 0), 0);
+
+    return {
+      kpis: {
+        totalFarmers,
+        totalBuyers,
+        pendingFarmers,
+        pendingBuyers,
+        approvedToday,
+        rejectedToday,
+        activeLots,
+        activeBiddingLots,
+        soldLots,
+        cancelledLots,
+        pendingBids,
+        acceptedBids,
+        cancelledBids,
+        totalTransactionValue,
+        completedPaymentsValue,
+        pendingPaymentsValue,
+        platformFeeEliminatedSavings: Math.round(totalTransactionValue * 0.04),
+      },
       recentActivity,
     };
   }
 
-  async getRegistrations(query: {
+  async getRegistrations(filters?: {
     role?: Role;
     status?: ApprovalStatus;
     search?: string;
     sort?: 'asc' | 'desc';
   }) {
-    try {
-      const filter: any = {
-        role: { $in: [Role.FARMER, Role.BUYER] },
-      };
+    const query: any = {};
+    if (filters?.role) query.role = filters.role;
+    if (filters?.status) query.approvalStatus = filters.status;
 
-      if (query.role) filter.role = query.role;
-      if (query.status) filter.approvalStatus = query.status;
-      if (query.search) {
-        const regex = new RegExp(query.search, 'i');
-        filter.$or = [
-          { name: regex },
-          { phone: regex },
-          { email: regex },
-          { district: regex },
-          { state: regex },
-          { organization: regex },
-        ];
-      }
+    const sortDirection = filters?.sort === 'asc' ? 1 : -1;
+    let users = await this.userModel.find(query).sort({ createdAt: sortDirection }).lean();
 
-      const sortOrder = query.sort === 'asc' ? 1 : -1;
-      const list = await this.userModel.find(filter).sort({ createdAt: sortOrder }).lean();
-      if (list && list.length > 0) {
-        return list.map((u) => ({
-          ...u,
-          id: u._id,
-        }));
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getRegistrations fallback: ${err.message}`);
-    }
-
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    let filtered = allUsers.filter((u) => u.role !== Role.ADMIN);
-
-    if (query.role) filtered = filtered.filter((u) => u.role === query.role);
-    if (query.status) filtered = filtered.filter((u) => u.approvalStatus === query.status);
-    if (query.search) {
-      const q = query.search.toLowerCase();
-      filtered = filtered.filter(
+    if (filters?.search && filters.search.trim() !== '') {
+      const s = filters.search.toLowerCase().trim();
+      users = users.filter(
         (u) =>
-          u.name?.toLowerCase().includes(q) ||
-          u.phone?.includes(q) ||
-          u.email?.toLowerCase().includes(q) ||
-          u.district?.toLowerCase().includes(q) ||
-          u.state?.toLowerCase().includes(q) ||
-          u.organization?.toLowerCase().includes(q),
+          u.name.toLowerCase().includes(s) ||
+          (u.phone && u.phone.includes(s)) ||
+          (u.email && u.email.toLowerCase().includes(s)) ||
+          (u.organization && u.organization.toLowerCase().includes(s)) ||
+          (u.district && u.district.toLowerCase().includes(s)) ||
+          (u.state && u.state.toLowerCase().includes(s)),
       );
     }
 
-    filtered.sort((a, b) => {
-      const dateA = new Date(a.createdAt || 0).getTime();
-      const dateB = new Date(b.createdAt || 0).getTime();
-      return query.sort === 'asc' ? dateA - dateB : dateB - dateA;
-    });
-
-    return filtered.map((u) => ({ ...u, id: u._id || u.id }));
+    return users.map((u) => ({
+      id: u._id || (u as any).id,
+      name: u.name,
+      phone: u.phone,
+      email: u.email,
+      role: u.role,
+      approvalStatus: u.approvalStatus || ApprovalStatus.APPROVED,
+      verificationStatus: u.verificationStatus || VerificationStatus.VERIFIED,
+      rejectionReason: u.rejectionReason,
+      profilePhoto: u.profilePhoto,
+      district: u.district,
+      state: u.state,
+      village: u.village,
+      location: u.location,
+      geoPoint: u.geoPoint,
+      organization: u.organization,
+      contactPerson: u.contactPerson,
+      businessType: u.businessType,
+      warehouseLocation: u.warehouseLocation,
+      primaryCrop: u.primaryCrop,
+      farmSize: u.farmSize,
+      gstin: u.gstin,
+      fssai: u.fssai,
+      kccNumber: u.kccNumber,
+      apmcLicense: u.apmcLicense,
+      createdAt: u.createdAt,
+      approvedAt: u.approvedAt,
+    }));
   }
 
   async getRegistrationById(id: string) {
-    try {
-      const user = await this.userModel.findById(id).lean();
-      if (user) {
-        return { ...user, id: user._id };
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getRegistrationById fallback for ${id}: ${err.message}`);
+    return this.getUserDossier(id);
+  }
+
+  async getUserDossier(userId: string) {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    const user = allUsers.find((u) => u.id === id || u._id === id);
-    if (!user) throw new NotFoundException(`User registration ${id} not found.`);
-    return { ...user, id: user._id || user.id };
+    const auditLogs = await this.auditModelLogsForActor(userId);
+    let lots: any[] = [];
+    let bids: any[] = [];
+
+    if (user.role === Role.FARMER) {
+      lots = await this.cropLotModel.find({ farmerId: userId }).sort({ createdAt: -1 }).lean();
+    } else if (user.role === Role.BUYER) {
+      bids = await this.bidModel.find({ buyerId: userId }).sort({ createdAt: -1 }).lean();
+    }
+
+    return {
+      user: {
+        id: user._id,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        role: user.role,
+        approvalStatus: user.approvalStatus,
+        verificationStatus: user.verificationStatus,
+        rejectionReason: user.rejectionReason,
+        profilePhoto: user.profilePhoto,
+        district: user.district,
+        state: user.state,
+        village: user.village,
+        location: user.location,
+        geoPoint: user.geoPoint,
+        organization: user.organization,
+        contactPerson: user.contactPerson,
+        businessType: user.businessType,
+        warehouseLocation: user.warehouseLocation,
+        primaryCrop: user.primaryCrop,
+        farmSize: user.farmSize,
+        gstin: user.gstin,
+        fssai: user.fssai,
+        kccNumber: user.kccNumber,
+        apmcLicense: user.apmcLicense,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt,
+        approvedAt: user.approvedAt,
+      },
+      lots: lots.map((l) => ({ ...l, id: l._id })),
+      bids: bids.map((b) => ({ ...b, id: b._id })),
+      auditLogs,
+    };
+  }
+
+  private async auditModelLogsForActor(actorId: string) {
+    const logs = await this.auditLogModel
+      .find({ actorId })
+      .sort({ timestamp: -1 })
+      .limit(20)
+      .lean();
+    return logs.map((l) => ({ ...l, id: l._id }));
   }
 
   async approveUser(userId: string, adminId: string) {
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    const memoryUser = allUsers.find((u) => u.id === userId || u._id === userId);
-    if (memoryUser) {
-      memoryUser.approvalStatus = ApprovalStatus.APPROVED;
-      memoryUser.verificationStatus = VerificationStatus.VERIFIED;
-      memoryUser.isVerified = true;
-      memoryUser.approvedBy = adminId;
-      memoryUser.approvedAt = new Date();
-      memoryUser.rejectionReason = null;
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    try {
-      const updated = await this.userModel
-        .findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              approvalStatus: ApprovalStatus.APPROVED,
-              verificationStatus: VerificationStatus.VERIFIED,
-              isVerified: true,
-              approvedBy: adminId,
-              approvedAt: new Date(),
-              rejectionReason: null,
-            },
+    const updated = await this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          $set: {
+            approvalStatus: ApprovalStatus.APPROVED,
+            verificationStatus: VerificationStatus.VERIFIED,
+            isVerified: true,
+            approvedBy: adminId,
+            approvedAt: new Date(),
+            rejectionReason: null,
+            updatedAt: new Date(),
           },
-          { new: true },
-        )
-        .lean();
-
-      if (updated) {
-        await this.auditService.log({
-          actorId: adminId,
-          action: AuditAction.USER_APPROVED,
-          metadata: { userId: updated._id, userName: updated.name, role: updated.role },
-        });
-
-        await this.notificationsService.create({
-          recipientId: updated._id,
-          type: NotificationType.SYSTEM,
-          title: 'Account Registration Approved! 🎉',
-          message: 'Your Vanijya account has been verified and approved by the administrator. You may now sign in and access the trading dashboard.',
-          entityType: 'USER',
-          entityId: updated._id,
-        });
-
-        return {
-          success: true,
-          message: `User ${updated.name} (${updated.role}) has been successfully approved.`,
-          user: { ...updated, id: updated._id },
-        };
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB approveUser fallback for ${userId}: ${err.message}`);
-    }
-
-    if (!memoryUser) throw new NotFoundException(`User registration ${userId} not found.`);
+        },
+        { new: true },
+      )
+      .lean();
 
     await this.auditService.log({
       actorId: adminId,
       action: AuditAction.USER_APPROVED,
-      metadata: { userId: memoryUser.id, userName: memoryUser.name, role: memoryUser.role },
+      metadata: { targetUserId: userId, role: user.role, name: user.name },
     });
 
     await this.notificationsService.create({
-      recipientId: memoryUser.id,
+      recipientId: userId,
       type: NotificationType.SYSTEM,
-      title: 'Account Registration Approved! 🎉',
-      message: 'Your Vanijya account has been verified and approved by the administrator. You may now sign in and access the trading dashboard.',
+      title: 'Vanijya Account Approved & Verified',
+      message:
+        'Your registration application has been verified and approved by the Ministry Administrator. You now have full access to the portal.',
       entityType: 'USER',
-      entityId: memoryUser.id,
+      entityId: userId,
     });
 
     return {
       success: true,
-      message: `User ${memoryUser.name} (${memoryUser.role}) has been successfully approved.`,
-      user: memoryUser,
+      message: `User ${user.name} has been approved and verified.`,
+      user: {
+        id: updated!._id,
+        name: updated!.name,
+        role: updated!.role,
+        approvalStatus: updated!.approvalStatus,
+        verificationStatus: updated!.verificationStatus,
+      },
     };
   }
 
   async rejectUser(userId: string, adminId: string, reason: string) {
     if (!reason || reason.trim() === '') {
-      throw new BadRequestException('A reason for rejection must be provided.');
+      throw new BadRequestException('A constructive rejection reason is required.');
     }
 
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    const memoryUser = allUsers.find((u) => u.id === userId || u._id === userId);
-    if (memoryUser) {
-      memoryUser.approvalStatus = ApprovalStatus.REJECTED;
-      memoryUser.verificationStatus = VerificationStatus.REJECTED;
-      memoryUser.isVerified = false;
-      memoryUser.rejectionReason = reason;
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found.`);
     }
 
-    try {
-      const updated = await this.userModel
-        .findByIdAndUpdate(
-          userId,
-          {
-            $set: {
-              approvalStatus: ApprovalStatus.REJECTED,
-              verificationStatus: VerificationStatus.REJECTED,
-              isVerified: false,
-              rejectionReason: reason,
-            },
+    const updated = await this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          $set: {
+            approvalStatus: ApprovalStatus.REJECTED,
+            verificationStatus: VerificationStatus.REJECTED,
+            isVerified: false,
+            rejectionReason: reason.trim(),
+            updatedAt: new Date(),
           },
-          { new: true },
-        )
-        .lean();
-
-      if (updated) {
-        await this.auditService.log({
-          actorId: adminId,
-          action: AuditAction.USER_REJECTED,
-          metadata: { userId: updated._id, userName: updated.name, role: updated.role, reason },
-        });
-
-        await this.notificationsService.create({
-          recipientId: updated._id,
-          type: NotificationType.SYSTEM,
-          title: 'Account Registration Update',
-          message: `Your Vanijya account registration was rejected. Reason: ${reason}`,
-          entityType: 'USER',
-          entityId: updated._id,
-        });
-
-        return {
-          success: true,
-          message: `User ${updated.name} registration was rejected.`,
-          user: { ...updated, id: updated._id },
-        };
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB rejectUser fallback: ${err.message}`);
-    }
-
-    if (!memoryUser) throw new NotFoundException(`User registration ${userId} not found.`);
+        },
+        { new: true },
+      )
+      .lean();
 
     await this.auditService.log({
       actorId: adminId,
       action: AuditAction.USER_REJECTED,
-      metadata: { userId: memoryUser.id, userName: memoryUser.name, role: memoryUser.role, reason },
+      metadata: { targetUserId: userId, role: user.role, name: user.name, reason },
     });
 
     await this.notificationsService.create({
-      recipientId: memoryUser.id,
+      recipientId: userId,
       type: NotificationType.SYSTEM,
-      title: 'Account Registration Update',
-      message: `Your Vanijya account registration was rejected. Reason: ${reason}`,
+      title: 'Registration Application Update',
+      message: `Your Vanijya registration could not be approved at this time. Reason: ${reason.trim()}`,
       entityType: 'USER',
-      entityId: memoryUser.id,
+      entityId: userId,
     });
 
     return {
       success: true,
-      message: `User ${memoryUser.name} registration was rejected.`,
-      user: memoryUser,
+      message: `User ${user.name} application has been rejected.`,
+      user: {
+        id: updated!._id,
+        name: updated!.name,
+        role: updated!.role,
+        approvalStatus: updated!.approvalStatus,
+        rejectionReason: updated!.rejectionReason,
+      },
     };
   }
 
-  async getAllLots(query: any = {}) {
-    try {
-      const filter: any = {};
-      if (query.status) filter.status = query.status;
-      if (query.cropId) filter.cropId = query.cropId;
-
-      const lots = await this.cropLotModel.find(filter).sort({ createdAt: -1 }).lean();
-      if (lots && lots.length > 0) {
-        const crops = await this.cropModel.find().lean();
-        const users = await this.userModel.find().lean();
-        const cropMap = new Map(crops.map((c) => [c._id, c]));
-        const userMap = new Map(users.map((u) => [u._id, u]));
-
-        return lots.map((l) => ({
-          ...l,
-          id: l._id,
-          crop: cropMap.get(l.cropId) || { name: 'Produce' },
-          farmer: userMap.get(l.farmerId) || { name: 'Farmer' },
-        }));
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getAllLots fallback: ${err.message}`);
-    }
-
-    let lots = [...FALLBACK_LOTS];
-    if (query.status) lots = lots.filter((l) => l.status === query.status);
-    if (query.cropId) lots = lots.filter((l) => l.cropId === query.cropId || l.crop?.name === query.cropId);
-    return lots;
-  }
-
-  async getAllBids(query: any = {}) {
-    try {
-      const filter: any = {};
-      if (query.status) filter.status = query.status;
-
-      const bids = await this.bidModel.find(filter).sort({ createdAt: -1 }).lean();
-      if (bids && bids.length > 0) {
-        const users = await this.userModel.find().lean();
-        const lots = await this.cropLotModel.find().lean();
-        const crops = await this.cropModel.find().lean();
-
-        const userMap = new Map(users.map((u) => [u._id, u]));
-        const lotMap = new Map(lots.map((l) => [l._id, l]));
-        const cropMap = new Map(crops.map((c) => [c._id, c]));
-
-        return bids.map((b) => {
-          const lot = lotMap.get(b.lotId);
-          const crop = lot ? cropMap.get(lot.cropId) : null;
-          const buyer = userMap.get(b.buyerId);
-          const farmer = lot ? userMap.get(lot.farmerId) : null;
-
-          return {
-            ...b,
-            id: b._id,
-            buyer: buyer ? { name: buyer.name, district: buyer.district, phone: buyer.phone } : { name: 'Buyer' },
-            lot: lot ? { ...lot, id: lot._id, crop: crop || { name: 'Produce' }, farmer: farmer || { name: 'Farmer' } } : null,
-          };
-        });
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getAllBids fallback: ${err.message}`);
-    }
-
-    let bids = [...FALLBACK_BIDS];
-    if (query.status) bids = bids.filter((b) => b.status === query.status);
-    return bids;
-  }
-
   async getUsers() {
-    try {
-      const users = await this.userModel.find().lean();
-      if (users && users.length > 0) {
-        const lots = await this.cropLotModel.find().lean();
-        const bids = await this.bidModel.find().lean();
-        const txns = await this.transactionModel.find().lean();
+    return this.getAllUsers();
+  }
 
-        const farmers = users
-          .filter((u) => u.role === Role.FARMER)
-          .map((f) => ({
-            ...f,
-            id: f._id,
-            activeLots: lots.filter((l) => l.farmerId === f._id && l.status !== CropLotStatus.SOLD && l.status !== CropLotStatus.CANCELLED).length,
-            soldLots: lots.filter((l) => l.farmerId === f._id && l.status === CropLotStatus.SOLD).length,
-            totalSales: txns.filter((t) => t.farmerId === f._id).reduce((acc, t) => acc + (t.totalAmount || 0), 0),
-          }));
+  async getAllUsers(role?: Role) {
+    const query: any = {};
+    if (role) query.role = role;
+    const users = await this.userModel.find(query).sort({ createdAt: -1 }).lean();
+    return users.map((u) => ({
+      id: u._id,
+      name: u.name,
+      phone: u.phone,
+      email: u.email,
+      role: u.role,
+      approvalStatus: u.approvalStatus || ApprovalStatus.APPROVED,
+      verificationStatus: u.verificationStatus || VerificationStatus.VERIFIED,
+      profilePhoto: u.profilePhoto,
+      district: u.district,
+      state: u.state,
+      isVerified: u.isVerified,
+      createdAt: u.createdAt,
+    }));
+  }
 
-        const buyers = users
-          .filter((u) => u.role === Role.BUYER)
-          .map((b) => ({
-            ...b,
-            id: b._id,
-            activeBids: bids.filter((bid) => bid.buyerId === b._id && bid.status === BidStatus.PENDING).length,
-            acceptedBids: bids.filter((bid) => bid.buyerId === b._id && bid.status === BidStatus.ACCEPTED).length,
-            cancelledBids: bids.filter((bid) => bid.buyerId === b._id && bid.status === BidStatus.WITHDRAWN).length,
-            totalProcurement: txns.filter((t) => t.buyerId === b._id).reduce((acc, t) => acc + (t.totalAmount || 0), 0),
-          }));
+  async getAllLots(status?: any) {
+    const query: any = {};
+    if (typeof status === 'string') query.status = status;
+    else if (status && typeof status === 'object') Object.assign(query, status);
 
-        return { farmers, buyers };
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB getUsers fallback: ${err.message}`);
-    }
+    const lots = await this.cropLotModel.find(query).sort({ createdAt: -1 }).lean();
+    const crops = await this.cropModel.find().lean();
+    const farmers = await this.userModel.find().lean();
+    const bids = await this.bidModel.find().lean();
 
-    const allUsers = [...FALLBACK_USERS, ...this.authService.getInMemoryRegisteredUsers()];
-    const farmers = allUsers
-      .filter((u) => u.role === Role.FARMER)
-      .map((f) => ({
-        ...f,
-        id: f._id || f.id,
-        activeLots: FALLBACK_LOTS.filter((l) => l.farmerId === f.id && l.status !== CropLotStatus.SOLD).length,
-        soldLots: FALLBACK_LOTS.filter((l) => l.farmerId === f.id && l.status === CropLotStatus.SOLD).length,
-        totalSales: 174000,
-      }));
+    const cropMap = new Map(crops.map((c) => [c._id, c]));
+    const farmerMap = new Map(farmers.map((f) => [f._id, f]));
 
-    const buyers = allUsers
-      .filter((u) => u.role === Role.BUYER)
-      .map((b) => ({
+    return lots.map((l) => {
+      const lotBids = bids.filter((b) => b.lotId === l._id);
+      const farmer = farmerMap.get(l.farmerId);
+      return {
+        ...l,
+        id: l._id,
+        crop: cropMap.get(l.cropId) || { name: 'Crop' },
+        farmer: farmer
+          ? {
+              id: farmer._id,
+              name: farmer.name,
+              phone: farmer.phone,
+              district: farmer.district,
+              state: farmer.state,
+              isVerified: farmer.isVerified,
+              profilePhoto: farmer.profilePhoto,
+            }
+          : { name: 'Farmer' },
+        _count: { bids: lotBids.length },
+      };
+    });
+  }
+
+  async getAllBids(status?: any) {
+    const query: any = {};
+    if (typeof status === 'string') query.status = status;
+    else if (status && typeof status === 'object') Object.assign(query, status);
+
+    const bids = await this.bidModel.find(query).sort({ createdAt: -1 }).lean();
+    const buyers = await this.userModel.find().lean();
+    const lots = await this.cropLotModel.find().lean();
+    const crops = await this.cropModel.find().lean();
+
+    const buyerMap = new Map(buyers.map((u) => [u._id, u]));
+    const lotMap = new Map(lots.map((l) => [l._id, l]));
+    const cropMap = new Map(crops.map((c) => [c._id, c]));
+
+    return bids.map((b) => {
+      const buyer = buyerMap.get(b.buyerId);
+      const lot = lotMap.get(b.lotId);
+      const crop = lot ? cropMap.get(lot.cropId) : null;
+      return {
         ...b,
-        id: b._id || b.id,
-        activeBids: FALLBACK_BIDS.filter((bid) => bid.buyerId === b.id && bid.status === BidStatus.PENDING).length,
-        acceptedBids: FALLBACK_BIDS.filter((bid) => bid.buyerId === b.id && bid.status === BidStatus.ACCEPTED).length,
-        cancelledBids: FALLBACK_BIDS.filter((bid) => bid.buyerId === b.id && bid.status === BidStatus.WITHDRAWN).length,
-        totalProcurement: 174000,
-      }));
-
-    return { farmers, buyers };
+        id: b._id,
+        buyer: buyer
+          ? {
+              id: buyer._id,
+              name: buyer.name,
+              phone: buyer.phone,
+              district: buyer.district,
+              state: buyer.state,
+              organization: buyer.organization,
+              isVerified: buyer.isVerified,
+              profilePhoto: buyer.profilePhoto,
+            }
+          : { name: 'Buyer' },
+        lot: lot ? { id: lot._id, crop: crop || { name: 'Crop' } } : null,
+      };
+    });
   }
 
   async getActivityFeed(limit: number = 50) {
     return this.auditService.getRecent(limit);
+  }
+
+  async getPlatformMetrics() {
+    const [farmers, buyers, lots, bids, txns, payments] = await Promise.all([
+      this.userModel.find({ role: Role.FARMER }).lean(),
+      this.userModel.find({ role: Role.BUYER }).lean(),
+      this.cropLotModel.find().lean(),
+      this.bidModel.find().lean(),
+      this.transactionModel.find().lean(),
+      this.paymentModel.find().lean(),
+    ]);
+
+    const totalTransactionValue = txns.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
+    const completedPaymentsValue = payments
+      .filter((p) => p.status === PaymentStatus.PAID)
+      .reduce((acc, p) => acc + (p.amount || 0), 0);
+
+    return {
+      activeParticipants: {
+        farmers: farmers.map((f) => ({
+          id: f._id,
+          name: f.name,
+          district: f.district,
+          state: f.state,
+          primaryCrop: f.primaryCrop,
+          activeLots: lots.filter((l) => l.farmerId === f._id && l.status !== CropLotStatus.SOLD)
+            .length,
+          soldLots: lots.filter((l) => l.farmerId === f._id && l.status === CropLotStatus.SOLD)
+            .length,
+        })),
+        buyers: buyers.map((b) => ({
+          id: b._id,
+          name: b.name,
+          organization: b.organization,
+          district: b.district,
+          state: b.state,
+          activeBids: bids.filter((bid) => bid.buyerId === b._id && bid.status === BidStatus.PENDING)
+            .length,
+          acceptedBids: bids.filter(
+            (bid) => bid.buyerId === b._id && bid.status === BidStatus.ACCEPTED,
+          ).length,
+          cancelledBids: bids.filter(
+            (bid) => bid.buyerId === b._id && bid.status === BidStatus.WITHDRAWN,
+          ).length,
+        })),
+      },
+      gmv: totalTransactionValue,
+      settledGmv: completedPaymentsValue,
+      platformFeeSavings: Math.round(totalTransactionValue * 0.04),
+    };
   }
 }

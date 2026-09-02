@@ -57,25 +57,30 @@ export class DatabaseService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    this.connection.on('connected', () => {
+    this.connection.on('connected', async () => {
       this.isConnected = true;
-      this.logger.log('🍃 MongoDB connected successfully.');
+      this.logger.log('🍃 MongoDB connection established.');
+      await this.seedInitialData();
     });
 
     this.connection.on('error', (err) => {
       this.isConnected = false;
-      this.logger.warn(`🍃 MongoDB connection warning: ${err.message}. Resilient fallback active.`);
+      this.logger.error(`❌ MongoDB connection error: ${err.message}`);
+    });
+
+    this.connection.on('disconnected', () => {
+      this.isConnected = false;
+      this.logger.warn('⚠️ MongoDB disconnected.');
     });
 
     if (this.connection.readyState === 1) {
       this.isConnected = true;
-      this.logger.log('🍃 MongoDB is ready.');
       await this.seedInitialData();
     }
   }
 
   /**
-   * Seeds demo data (Farmers, Buyers, Admin, Crops, Markets, MandiPrices, Lots, Bids)
+   * Seeds demo data (Farmers, Buyers, Admin, Crops, Markets, MandiPrices, Lots, Bids, Transactions, Payments, Notifications, AuditLogs)
    */
   async seedInitialData() {
     try {
@@ -85,7 +90,7 @@ export class DatabaseService implements OnModuleInit {
         return;
       }
 
-      this.logger.log('🌱 Seeding initial MongoDB dataset...');
+      this.logger.log('🌱 Seeding initial MongoDB dataset for fresh environment...');
 
       const defaultHash = await bcrypt.hash('Farmer@123', 10);
       const buyerHash = await bcrypt.hash('asdfcv321', 10);
@@ -369,6 +374,35 @@ export class DatabaseService implements OnModuleInit {
         },
       ];
       await this.bidModel.insertMany(bidsData);
+
+      // 7. Seed Notifications
+      const notifsData: Partial<Notification>[] = [
+        {
+          _id: 'notif-demo-1',
+          recipientId: 'usr-farmer-1',
+          type: NotificationType.BID_RECEIVED,
+          title: 'New Bid Received for Tomato Lot',
+          message: 'FreshCart Agro Ltd. has placed a bid of ₹2,250/Quintal for 100 Quintals.',
+          entityType: 'LOT',
+          entityId: 'lot-demo-1',
+          isRead: false,
+          createdAt: new Date(),
+        },
+      ];
+      await this.notificationModel.insertMany(notifsData);
+
+      // 8. Seed Audit Log
+      const auditData: Partial<AuditLog>[] = [
+        {
+          _id: 'audit-demo-1',
+          actorId: 'usr-admin-1',
+          actorRole: 'ADMIN',
+          action: AuditAction.USER_APPROVED,
+          metadata: { systemInit: true, message: 'Vanijya system initialized and verified demo accounts.' },
+          timestamp: new Date(),
+        },
+      ];
+      await this.auditLogModel.insertMany(auditData);
 
       this.logger.log('✅ MongoDB initial dataset seeded successfully.');
     } catch (err: any) {

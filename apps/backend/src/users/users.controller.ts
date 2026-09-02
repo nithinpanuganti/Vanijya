@@ -75,7 +75,7 @@ export class UsersController {
       mimeType = file.mimetype;
       filename = file.originalname;
     } else if (base64Data) {
-      const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      const matches = base64Data.match(/^data:([A-Za-z-+]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         mimeType = matches[1];
         buffer = Buffer.from(matches[2], 'base64');

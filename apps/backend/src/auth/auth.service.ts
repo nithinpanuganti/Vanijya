@@ -12,17 +12,23 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
-import { User, UserDocument, Role, VerificationStatus, ApprovalStatus, AuditAction, NotificationType } from '../database/schemas';
+import {
+  User,
+  UserDocument,
+  Role,
+  VerificationStatus,
+  ApprovalStatus,
+  AuditAction,
+  NotificationType,
+} from '../database/schemas';
 import { CaptchaService } from './captcha.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
-import { computeProfileCompletion, FALLBACK_USERS } from '../users/users.service';
+import { computeProfileCompletion } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { PhotoStorageService } from '../users/photo-storage.service';
-
-export { FALLBACK_USERS };
 
 interface LoginAttemptTracker {
   count: number;
@@ -32,7 +38,6 @@ interface LoginAttemptTracker {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private inMemoryRegisteredUsers: any[] = [];
   private loginAttempts = new Map<string, LoginAttemptTracker>();
 
   constructor(
@@ -72,7 +77,7 @@ export class AuthService {
     const hasUpper = /[A-Z]/.test(password);
     const hasLower = /[a-z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
-    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+    const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password);
 
     if (!hasUpper || !hasLower || !hasNumber || !hasSpecial) {
       throw new BadRequestException(
@@ -114,7 +119,7 @@ export class AuthService {
     let profilePhoto: any = null;
     if (dto.profilePhotoBase64) {
       try {
-        const matches = dto.profilePhotoBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        const matches = dto.profilePhotoBase64.match(/^data:([A-Za-z-+]+);base64,(.+)$/);
         let buffer: Buffer;
         let mimeType = 'image/jpeg';
         if (matches && matches.length === 3) {
@@ -129,7 +134,7 @@ export class AuthService {
           mimeType,
         );
       } catch (err: any) {
-        this.logger.warn(`Photo storage during registration fallback: ${err.message}`);
+        this.logger.warn(`Photo storage fallback during registration: ${err.message}`);
         profilePhoto = {
           url: dto.profilePhotoUrl || '/images/avatars/default.svg',
           mimeType: 'image/svg+xml',
@@ -147,14 +152,12 @@ export class AuthService {
     }
 
     const userId = `usr-${Date.now()}`;
-    const userData: any = {
+    const userData: Partial<User> = {
       _id: userId,
-      id: userId,
       name: dto.name,
       phone: dto.phone,
       email: dto.email || null,
       passwordHash,
-      password: dto.password,
       role: dto.role,
       verificationStatus: VerificationStatus.PENDING,
       approvalStatus: ApprovalStatus.PENDING,
@@ -179,34 +182,24 @@ export class AuthService {
       kccNumber: dto.kccNumber || null,
       apmcLicense: dto.apmcLicense || null,
       isVerified: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     };
 
-    try {
-      if (dto.phone) {
-        const existingPhone = await this.userModel.findOne({ phone: dto.phone }).lean();
-        if (existingPhone) {
-          throw new ConflictException('Mobile number is already registered.');
-        }
+    if (dto.phone) {
+      const existingPhone = await this.userModel.findOne({ phone: dto.phone }).lean();
+      if (existingPhone) {
+        throw new ConflictException('Mobile number is already registered.');
       }
-
-      if (dto.email) {
-        const existingEmail = await this.userModel.findOne({ email: dto.email }).lean();
-        if (existingEmail) {
-          throw new ConflictException('Email address is already registered.');
-        }
-      }
-
-      const created = await this.userModel.create(userData);
-      this.logger.log(`Created new MongoDB user: ${created._id} (${created.name})`);
-    } catch (err: any) {
-      if (err instanceof ConflictException) throw err;
-      this.logger.warn(`MongoDB insert fallback to in-memory registration: ${err.message}`);
     }
 
-    // Always maintain in-memory fallback cache for test resilience
-    this.inMemoryRegisteredUsers.unshift(userData);
+    if (dto.email) {
+      const existingEmail = await this.userModel.findOne({ email: dto.email }).lean();
+      if (existingEmail) {
+        throw new ConflictException('Email address is already registered.');
+      }
+    }
+
+    await this.userModel.create(userData);
+    this.logger.log(`Created new MongoDB user: ${userId} (${dto.name})`);
 
     // Audit Log
     await this.auditService.log({
@@ -220,7 +213,7 @@ export class AuthService {
       recipientId: 'usr-admin-1',
       type: NotificationType.SYSTEM,
       title: `New ${dto.role === Role.FARMER ? 'Farmer' : 'Buyer'} Registration Request`,
-      message: `${dto.name} (${dto.district}, ${dto.state}) has submitted a registration application with photo & location for admin review.`,
+      message: `${dto.name} (${dto.district}, ${dto.state}) has submitted a registration application for admin review.`,
       entityType: 'USER',
       entityId: userId,
     });
@@ -230,14 +223,16 @@ export class AuthService {
       recipientId: userId,
       type: NotificationType.SYSTEM,
       title: 'Registration Submitted for Verification',
-      message: 'Your Vanijya account has been submitted for admin verification. You will be able to sign in once an administrator approves your account.',
+      message:
+        'Your Vanijya account has been submitted for admin verification. You will be able to sign in once an administrator approves your account.',
       entityType: 'USER',
       entityId: userId,
     });
 
     return {
       success: true,
-      message: 'Your Vanijya account has been submitted for verification. You can sign in once an administrator approves your account.',
+      message:
+        'Your Vanijya account has been submitted for verification. You can sign in once an administrator approves your account.',
       userId,
       approvalStatus: ApprovalStatus.PENDING,
     };
@@ -256,23 +251,11 @@ export class AuthService {
     }
 
     // 2. MongoDB Lookup
-    let user: any = null;
-    try {
-      user = await this.userModel
-        .findOne({
-          $or: [{ phone: dto.identifier }, { email: dto.identifier }],
-        })
-        .lean();
-    } catch (err: any) {
-      this.logger.warn(`MongoDB lookup error: ${err.message}`);
-    }
-
-    if (!user) {
-      const allFallback = [...FALLBACK_USERS, ...this.inMemoryRegisteredUsers];
-      user = allFallback.find(
-        (u) => u.phone === dto.identifier || u.email === dto.identifier,
-      );
-    }
+    const user = await this.userModel
+      .findOne({
+        $or: [{ phone: dto.identifier }, { email: dto.identifier }],
+      })
+      .lean();
 
     if (!user) {
       throw new UnauthorizedException('Invalid phone/email or password.');
@@ -282,15 +265,6 @@ export class AuthService {
     let isMatch = false;
     if (user.passwordHash) {
       isMatch = await bcrypt.compare(dto.password, user.passwordHash).catch(() => false);
-    }
-    if (
-      !isMatch &&
-      (user.password === dto.password ||
-        dto.password === 'Farmer@123' ||
-        dto.password === 'asdfcv321' ||
-        dto.password === 'Admin@123')
-    ) {
-      isMatch = true;
     }
 
     if (!isMatch) {
@@ -318,7 +292,7 @@ export class AuthService {
     }
 
     const completion = computeProfileCompletion(user);
-    const userId = user._id || user.id;
+    const userId = user._id || (user as any).id;
     const payload = { sub: userId, role: user.role, name: user.name };
     const accessToken = this.jwtService.sign(payload);
 
@@ -348,9 +322,5 @@ export class AuthService {
         ...completion,
       },
     };
-  }
-
-  getInMemoryRegisteredUsers() {
-    return this.inMemoryRegisteredUsers;
   }
 }

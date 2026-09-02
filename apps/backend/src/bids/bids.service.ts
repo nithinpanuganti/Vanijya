@@ -23,99 +23,130 @@ import {
   NotificationType,
 } from '../database/schemas';
 import { CreateBidDto } from './dto/create-bid.dto';
-import { FALLBACK_LOTS } from '../lots/lots.service';
-import { FALLBACK_USERS } from '../users/users.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
-
-export const FALLBACK_BIDS: any[] = [
-  {
-    _id: 'bid-demo-1',
-    id: 'bid-demo-1',
-    lotId: 'lot-demo-1',
-    buyerId: 'usr-buyer-1',
-    price: 2250,
-    quantity: 100,
-    message: 'Direct warehouse pickup, ready for instant bank settlement',
-    status: BidStatus.PENDING,
-    createdAt: new Date(Date.now() - 3600000),
-    updatedAt: new Date(Date.now() - 3600000),
-    buyer: {
-      id: 'usr-buyer-1',
-      name: 'FreshCart Agro Ltd.',
-      district: 'Mumbai',
-      state: 'Maharashtra',
-      isVerified: true,
-      profilePhoto: { url: '/images/avatars/buyer-freshcart.svg' },
-    },
-    lot: {
-      id: 'lot-demo-1',
-      cropId: 'crop-tomato',
-      quantity: 100,
-      unit: 'QUINTAL',
-      expectedPrice: 2200,
-      crop: { id: 'crop-tomato', name: 'Tomato' },
-      farmer: { id: 'usr-farmer-1', name: 'Ramesh Patel' },
-    },
-  },
-  {
-    _id: 'bid-demo-2',
-    id: 'bid-demo-2',
-    lotId: 'lot-demo-2',
-    buyerId: 'usr-buyer-2',
-    price: 1700,
-    quantity: 50,
-    message: 'Advance payment on pickup',
-    status: BidStatus.WITHDRAWN,
-    createdAt: new Date(Date.now() - 7200000),
-    updatedAt: new Date(Date.now() - 3600000),
-    buyer: {
-      id: 'usr-buyer-2',
-      name: 'GreenSpire Foods',
-      district: 'Delhi',
-      state: 'Delhi',
-      isVerified: true,
-      profilePhoto: { url: '/images/avatars/buyer-greenspire.svg' },
-    },
-    lot: {
-      id: 'lot-demo-2',
-      cropId: 'crop-onion',
-      quantity: 80,
-      unit: 'QUINTAL',
-      expectedPrice: 1650,
-      crop: { id: 'crop-onion', name: 'Onion' },
-      farmer: { id: 'usr-farmer-1', name: 'Ramesh Patel' },
-    },
-  },
-];
-
-export const FALLBACK_TRANSACTIONS: any[] = [];
-export const FALLBACK_PAYMENTS: any[] = [];
 
 @Injectable()
 export class BidsService {
   private readonly logger = new Logger(BidsService.name);
 
   constructor(
+    @InjectConnection() private readonly connection: Connection,
     @InjectModel(Bid.name) private readonly bidModel: Model<BidDocument>,
     @InjectModel(CropLot.name) private readonly cropLotModel: Model<CropLotDocument>,
     @InjectModel(Crop.name) private readonly cropModel: Model<CropDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Transaction.name) private readonly transactionModel: Model<TransactionDocument>,
     @InjectModel(Payment.name) private readonly paymentModel: Model<PaymentDocument>,
-    @InjectConnection() private readonly connection: Connection,
     private readonly auditService: AuditService,
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
   ) {}
 
+  private enrichBid(bid: any, lot?: any, buyer?: any, farmer?: any, crop?: any) {
+    const lotData = lot || bid.lot;
+    const buyerData = buyer || bid.buyer;
+    const cropData = crop || lotData?.crop;
+    const farmerData = farmer || lotData?.farmer;
+
+    return {
+      ...bid,
+      id: bid._id || bid.id,
+      buyer: buyerData
+        ? {
+            id: buyerData._id || buyerData.id,
+            name: buyerData.name,
+            phone: buyerData.phone,
+            district: buyerData.district,
+            state: buyerData.state,
+            organization: buyerData.organization,
+            isVerified: buyerData.isVerified,
+            profilePhoto: buyerData.profilePhoto,
+          }
+        : { name: 'Buyer' },
+      lot: lotData
+        ? {
+            id: lotData._id || lotData.id,
+            cropId: lotData.cropId,
+            quantity: lotData.quantity,
+            unit: lotData.unit,
+            expectedPrice: lotData.expectedPrice,
+            qualityGrade: lotData.qualityGrade,
+            location: lotData.location,
+            status: lotData.status,
+            crop: cropData || { name: 'Crop' },
+            farmer: farmerData
+              ? {
+                  id: farmerData._id || farmerData.id,
+                  name: farmerData.name,
+                  phone: farmerData.phone,
+                  district: farmerData.district,
+                  state: farmerData.state,
+                }
+              : { name: 'Farmer' },
+          }
+        : null,
+    };
+  }
+
   async createBid(lotId: string, buyerId: string, dto: CreateBidDto) {
-    const profile = await this.usersService.getProfile(buyerId).catch(() => null);
-    if (profile && profile.profileCompletionStatus === 'INCOMPLETE') {
-      const missing = profile.missingFields?.join(', ') || 'required fields';
+    return this.create(buyerId, { ...dto, lotId });
+  }
+
+  async findBidsForLot(lotId: string) {
+    return this.findByLot(lotId);
+  }
+
+  async findMyBids(userId: string) {
+    return this.findByBuyer(userId);
+  }
+
+  async modifyBidQuantity(bidId: string, buyerId: string, userRole: Role, newQuantity: number) {
+    return this.modifyQuantity(bidId, buyerId, userRole, newQuantity);
+  }
+
+  async rejectBid(bidId: string, farmerId: string, userRole: Role) {
+    const bid = await this.bidModel.findById(bidId).lean();
+    if (!bid) {
+      throw new NotFoundException(`Bid with ID ${bidId} not found.`);
+    }
+
+    const lot = await this.cropLotModel.findById(bid.lotId).lean();
+    if (!lot) {
+      throw new NotFoundException(`Crop Lot associated with bid ${bidId} not found.`);
+    }
+
+    if (lot.farmerId !== farmerId && userRole !== Role.ADMIN) {
+      throw new ForbiddenException('You are not authorized to reject bids for this lot.');
+    }
+
+    const updated = await this.bidModel
+      .findByIdAndUpdate(
+        bidId,
+        { $set: { status: BidStatus.REJECTED, updatedAt: new Date() } },
+        { new: true },
+      )
+      .lean();
+
+    await this.auditService.log({
+      actorId: farmerId,
+      action: AuditAction.BID_REJECTED,
+      lotId: lot._id,
+      bidId: bidId,
+    });
+
+    return this.enrichBid(updated, lot);
+  }
+
+  async create(buyerId: string, dto: CreateBidDto & { lotId?: string }) {
+    const lotId = dto.lotId!;
+    // Profile Gate
+    const buyer = await this.usersService.getProfile(buyerId).catch(() => null);
+    if (buyer && buyer.profileCompletionStatus === 'INCOMPLETE') {
+      const missing = buyer.missingFields?.join(', ') || 'required credentials';
       throw new BadRequestException(
-        `Please complete your buyer profile details (${missing}) before placing a bid.`,
+        `Please complete your buyer profile details (${missing}) before submitting a trade bid.`,
       );
     }
 
@@ -126,82 +157,27 @@ export class BidsService {
       throw new BadRequestException('Bid quantity must be greater than 0.');
     }
 
-    try {
-      const lot = await this.cropLotModel.findById(lotId).lean();
-      if (lot) {
-        if (lot.farmerId === buyerId) throw new BadRequestException('You cannot place a bid on your own crop lot.');
-        if (lot.status !== CropLotStatus.OPEN && lot.status !== CropLotStatus.BIDDING) {
-          throw new BadRequestException(`Cannot place a bid on lot with status ${lot.status}.`);
-        }
-        if (dto.quantity > lot.quantity) {
-          throw new BadRequestException(`Bid quantity cannot exceed available lot quantity (${lot.quantity} ${lot.unit}).`);
-        }
-
-        const bidId = `bid-${Date.now()}`;
-        const createdBid = await this.bidModel.create({
-          _id: bidId,
-          lotId,
-          buyerId,
-          price: Number(dto.price),
-          quantity: Number(dto.quantity),
-          message: dto.message,
-          status: BidStatus.PENDING,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-
-        await this.cropLotModel.findByIdAndUpdate(lotId, { $set: { status: CropLotStatus.BIDDING } });
-
-        await this.auditService.log({
-          actorId: buyerId,
-          action: AuditAction.BID_PLACED,
-          lotId,
-          bidId: createdBid._id,
-          price: Number(dto.price),
-          newQuantity: Number(dto.quantity),
-        });
-
-        await this.notificationsService.create({
-          recipientId: lot.farmerId,
-          type: NotificationType.BID_RECEIVED,
-          title: 'New Bid Received on Your Crop Lot',
-          message: `${profile?.name || 'A verified buyer'} placed an offer of ₹${dto.price}/${lot.unit} for ${dto.quantity} ${lot.unit}.`,
-          entityType: 'BID',
-          entityId: createdBid._id,
-        });
-
-        const buyer = await this.userModel.findById(buyerId).lean();
-        return {
-          ...createdBid.toObject(),
-          id: createdBid._id,
-          buyer: buyer ? { name: buyer.name, district: buyer.district, isVerified: buyer.isVerified } : { name: 'Buyer' },
-          lot,
-        };
-      }
-    } catch (err: any) {
-      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
-      this.logger.warn(`MongoDB createBid fallback: ${err.message}`);
+    const lot = await this.cropLotModel.findById(dto.lotId).lean();
+    if (!lot) {
+      throw new NotFoundException(`Crop Lot with ID ${dto.lotId} not found.`);
     }
 
-    return this.createBidInMemory(lotId, buyerId, dto, profile);
-  }
-
-  private async createBidInMemory(lotId: string, buyerId: string, dto: CreateBidDto, profile: any) {
-    const lot = FALLBACK_LOTS.find((l) => l.id === lotId || l._id === lotId);
-    if (!lot) throw new NotFoundException(`Crop lot with ID ${lotId} not found.`);
-    if (lot.farmerId === buyerId) throw new BadRequestException('You cannot place a bid on your own crop lot.');
+    if (lot.farmerId === buyerId) {
+      throw new BadRequestException('Farmers cannot place bids on their own produce.');
+    }
     if (lot.status !== CropLotStatus.OPEN && lot.status !== CropLotStatus.BIDDING) {
-      throw new BadRequestException(`Cannot place a bid on lot with status ${lot.status}.`);
+      throw new BadRequestException('Bids can only be placed on OPEN or ACTIVE BIDDING lots.');
     }
-    if (dto.quantity > lot.quantity) {
-      throw new BadRequestException(`Bid quantity cannot exceed available lot quantity (${lot.quantity} ${lot.unit}).`);
+    if (Number(dto.quantity) > lot.quantity) {
+      throw new BadRequestException(
+        `Requested bid quantity (${dto.quantity}) exceeds total available lot quantity (${lot.quantity}).`,
+      );
     }
 
-    lot.status = CropLotStatus.BIDDING;
-    const bid = {
-      _id: `bid-${Date.now()}`,
-      id: `bid-${Date.now()}`,
-      lotId,
+    const bidId = `bid-${Date.now()}`;
+    const bidData: Partial<Bid> = {
+      _id: bidId,
+      lotId: dto.lotId,
       buyerId,
       price: Number(dto.price),
       quantity: Number(dto.quantity),
@@ -209,526 +185,320 @@ export class BidsService {
       status: BidStatus.PENDING,
       createdAt: new Date(),
       updatedAt: new Date(),
-      buyer: {
-        id: buyerId,
-        name: profile?.name || 'FreshCart Agro Ltd.',
-        district: profile?.district || 'Mumbai',
-        state: profile?.state || 'Maharashtra',
-        isVerified: true,
-      },
-      lot: {
-        id: lot.id,
-        cropId: lot.cropId,
-        quantity: lot.quantity,
-        unit: lot.unit,
-        expectedPrice: lot.expectedPrice,
-        crop: lot.crop,
-        farmer: lot.farmer,
-      },
     };
 
-    FALLBACK_BIDS.unshift(bid);
-    lot.bids = lot.bids || [];
-    lot.bids.unshift(bid);
-    lot._count = { bids: lot.bids.length };
+    const created = await this.bidModel.create(bidData);
+
+    if (lot.status === CropLotStatus.OPEN) {
+      await this.cropLotModel.findByIdAndUpdate(dto.lotId, {
+        $set: { status: CropLotStatus.BIDDING },
+      });
+    }
+
+    const farmer = await this.userModel.findById(lot.farmerId).lean();
+    const crop = await this.cropModel.findById(lot.cropId).lean();
 
     await this.auditService.log({
       actorId: buyerId,
       action: AuditAction.BID_PLACED,
-      lotId,
-      bidId: bid.id,
-      price: Number(dto.price),
-      newQuantity: Number(dto.quantity),
+      lotId: dto.lotId,
+      bidId: created._id,
+      price: created.price,
+      newQuantity: created.quantity,
+      metadata: { buyerName: buyer?.name, cropName: crop?.name },
     });
 
     await this.notificationsService.create({
       recipientId: lot.farmerId,
       type: NotificationType.BID_RECEIVED,
       title: 'New Bid Received on Your Crop Lot',
-      message: `${profile?.name || 'A buyer'} placed an offer of ₹${dto.price}/${lot.unit} for ${dto.quantity} ${lot.unit}.`,
-      entityType: 'BID',
-      entityId: bid.id,
+      message: `${buyer?.name || 'A buyer'} placed an offer of ₹${created.price}/${lot.unit} for ${created.quantity} ${lot.unit} on your ${crop?.name || 'crop'} lot.`,
+      entityType: 'LOT',
+      entityId: dto.lotId,
     });
 
-    return bid;
+    return this.enrichBid(created.toObject(), lot, buyer, farmer, crop);
   }
 
-  async findBidsForLot(lotId: string) {
-    try {
-      const bids = await this.bidModel.find({ lotId }).sort({ price: -1 }).lean();
-      if (bids && bids.length > 0) {
-        const users = await this.userModel.find().lean();
-        const userMap = new Map(users.map((u) => [u._id, u]));
-        return bids.map((b) => {
-          const buyer = userMap.get(b.buyerId);
-          return {
-            ...b,
-            id: b._id,
-            buyer: buyer ? { name: buyer.name, district: buyer.district, isVerified: buyer.isVerified, profilePhoto: buyer.profilePhoto } : { name: 'Buyer' },
-          };
-        });
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB findBidsForLot fallback: ${err.message}`);
-    }
+  async findByLot(lotId: string) {
+    const bids = await this.bidModel.find({ lotId }).sort({ price: -1 }).lean();
+    if (!bids || bids.length === 0) return [];
 
-    return FALLBACK_BIDS.filter((b) => b.lotId === lotId).map((b) => ({ ...b, id: b._id || b.id }));
+    const lot = await this.cropLotModel.findById(lotId).lean();
+    const crop = lot ? await this.cropModel.findById(lot.cropId).lean() : null;
+    const farmer = lot ? await this.userModel.findById(lot.farmerId).lean() : null;
+    const buyerIds = Array.from(new Set(bids.map((b) => b.buyerId)));
+    const buyers = await this.userModel.find({ _id: { $in: buyerIds } }).lean();
+    const buyerMap = new Map(buyers.map((u) => [u._id, u]));
+
+    return bids.map((b) => this.enrichBid(b, lot, buyerMap.get(b.buyerId), farmer, crop));
   }
 
-  async findMyBids(buyerId: string) {
-    try {
-      const bids = await this.bidModel.find({ buyerId }).sort({ createdAt: -1 }).lean();
-      if (bids && bids.length > 0) {
-        const lots = await this.cropLotModel.find().lean();
-        const crops = await this.cropModel.find().lean();
-        const farmers = await this.userModel.find().lean();
+  async findByBuyer(buyerId: string) {
+    const bids = await this.bidModel.find({ buyerId }).sort({ createdAt: -1 }).lean();
+    if (!bids || bids.length === 0) return [];
 
-        const lotMap = new Map(lots.map((l) => [l._id, l]));
-        const cropMap = new Map(crops.map((c) => [c._id, c]));
-        const farmerMap = new Map(farmers.map((f) => [f._id, f]));
+    const buyer = await this.userModel.findById(buyerId).lean();
+    const lotIds = Array.from(new Set(bids.map((b) => b.lotId)));
+    const lots = await this.cropLotModel.find({ _id: { $in: lotIds } }).lean();
+    const lotMap = new Map(lots.map((l) => [l._id, l]));
 
-        return bids.map((b) => {
-          const lot = lotMap.get(b.lotId);
-          const crop = lot ? cropMap.get(lot.cropId) : null;
-          const farmer = lot ? farmerMap.get(lot.farmerId) : null;
+    const cropIds = Array.from(new Set(lots.map((l) => l.cropId)));
+    const crops = await this.cropModel.find({ _id: { $in: cropIds } }).lean();
+    const cropMap = new Map(crops.map((c) => [c._id, c]));
 
-          return {
-            ...b,
-            id: b._id,
-            lot: lot ? {
-              ...lot,
-              id: lot._id,
-              crop: crop || { name: 'Crop' },
-              farmer: farmer ? { name: farmer.name, phone: farmer.phone } : { name: 'Farmer' },
-            } : null,
-          };
-        });
-      }
-    } catch (err: any) {
-      this.logger.warn(`MongoDB findMyBids fallback: ${err.message}`);
-    }
+    const farmerIds = Array.from(new Set(lots.map((l) => l.farmerId)));
+    const farmers = await this.userModel.find({ _id: { $in: farmerIds } }).lean();
+    const farmerMap = new Map(farmers.map((f) => [f._id, f]));
 
-    return FALLBACK_BIDS.filter((b) => b.buyerId === buyerId).map((b) => ({ ...b, id: b._id || b.id }));
+    return bids.map((b) => {
+      const lot = lotMap.get(b.lotId);
+      const crop = lot ? cropMap.get(lot.cropId) : null;
+      const farmer = lot ? farmerMap.get(lot.farmerId) : null;
+      return this.enrichBid(b, lot, buyer, farmer, crop);
+    });
   }
 
-  async modifyBidQuantity(bidId: string, buyerId: string, userRole: Role, newQuantity: number) {
+  async modifyQuantity(bidId: string, buyerId: string, userRole: Role, newQuantity: number) {
     if (newQuantity <= 0) {
       throw new BadRequestException('Quantity must be greater than 0.');
     }
 
-    try {
-      const bid = await this.bidModel.findById(bidId).lean();
-      if (bid) {
-        if (bid.buyerId !== buyerId && userRole !== Role.ADMIN) {
-          throw new ForbiddenException('You are not authorized to modify this bid.');
-        }
-        if (bid.status !== BidStatus.PENDING) {
-          throw new BadRequestException(`Cannot modify bid with status ${bid.status}.`);
-        }
-
-        const lot = await this.cropLotModel.findById(bid.lotId).lean();
-        if (lot && newQuantity > lot.quantity) {
-          throw new BadRequestException(`New quantity cannot exceed available lot quantity (${lot.quantity} ${lot.unit}).`);
-        }
-
-        const oldQuantity = bid.quantity;
-        const updated = await this.bidModel
-          .findByIdAndUpdate(bidId, { $set: { quantity: newQuantity, updatedAt: new Date() } }, { new: true })
-          .lean();
-
-        await this.auditService.log({
-          actorId: buyerId,
-          action: AuditAction.QUANTITY_MODIFIED,
-          lotId: bid.lotId,
-          bidId,
-          oldQuantity,
-          newQuantity,
-          price: bid.price,
-        });
-
-        if (lot) {
-          await this.notificationsService.create({
-            recipientId: lot.farmerId,
-            type: NotificationType.BID_MODIFIED,
-            title: 'Bid Quantity Modified',
-            message: `Buyer updated their procurement quantity from ${oldQuantity} to ${newQuantity} ${lot.unit}.`,
-            entityType: 'BID',
-            entityId: bidId,
-          });
-        }
-
-        return { ...updated, id: updated?._id };
-      }
-    } catch (err: any) {
-      if (err instanceof BadRequestException || err instanceof ForbiddenException) throw err;
-      this.logger.warn(`MongoDB modifyBidQuantity fallback: ${err.message}`);
+    const bid = await this.bidModel.findById(bidId).lean();
+    if (!bid) {
+      throw new NotFoundException(`Bid with ID ${bidId} not found.`);
     }
 
-    // In-memory fallback
-    const bid = FALLBACK_BIDS.find((b) => b.id === bidId || b._id === bidId);
-    if (!bid) throw new NotFoundException(`Bid with ID ${bidId} not found.`);
     if (bid.buyerId !== buyerId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('You are not authorized to modify this bid.');
+      throw new ForbiddenException('You can only modify your own bids.');
     }
     if (bid.status !== BidStatus.PENDING) {
-      throw new BadRequestException(`Cannot modify bid with status ${bid.status}.`);
+      throw new BadRequestException('Only PENDING bids can be modified.');
+    }
+
+    const lot = await this.cropLotModel.findById(bid.lotId).lean();
+    if (!lot) {
+      throw new NotFoundException(`Crop Lot associated with bid ${bidId} not found.`);
+    }
+    if (newQuantity > lot.quantity) {
+      throw new BadRequestException(
+        `Quantity (${newQuantity}) exceeds available lot quantity (${lot.quantity}).`,
+      );
     }
 
     const oldQuantity = bid.quantity;
-    bid.quantity = newQuantity;
-    bid.updatedAt = new Date();
+    const updated = await this.bidModel
+      .findByIdAndUpdate(
+        bidId,
+        { $set: { quantity: newQuantity, updatedAt: new Date() } },
+        { new: true },
+      )
+      .lean();
+
+    const buyer = await this.userModel.findById(buyerId).lean();
+    const farmer = await this.userModel.findById(lot.farmerId).lean();
+    const crop = await this.cropModel.findById(lot.cropId).lean();
 
     await this.auditService.log({
       actorId: buyerId,
-      action: AuditAction.QUANTITY_MODIFIED,
-      lotId: bid.lotId,
-      bidId,
-      oldQuantity,
-      newQuantity,
-      price: bid.price,
+      action: AuditAction.BID_MODIFIED,
+      lotId: lot._id,
+      bidId: updated!._id,
+      previousQuantity: oldQuantity,
+      newQuantity: newQuantity,
+      metadata: { buyerName: buyer?.name, lotCrop: crop?.name },
     });
 
-    return { ...bid, id: bid._id || bid.id };
+    await this.notificationsService.create({
+      recipientId: lot.farmerId,
+      type: NotificationType.BID_MODIFIED,
+      title: 'Buyer Modified Bid Quantity',
+      message: `${buyer?.name || 'A buyer'} updated their bid quantity from ${oldQuantity} to ${newQuantity} ${lot.unit}.`,
+      entityType: 'LOT',
+      entityId: lot._id,
+    });
+
+    return this.enrichBid(updated, lot, buyer, farmer, crop);
   }
 
-  async cancelBid(bidId: string, buyerId: string, userRole: Role) {
-    try {
-      const bid = await this.bidModel.findById(bidId).lean();
-      if (bid) {
-        if (bid.buyerId !== buyerId && userRole !== Role.ADMIN) {
-          throw new ForbiddenException('You are not authorized to cancel this bid.');
-        }
-        if (bid.status !== BidStatus.PENDING) {
-          throw new BadRequestException(`Cannot cancel bid with status ${bid.status}. Only PENDING bids can be withdrawn.`);
-        }
-
-        const updated = await this.bidModel
-          .findByIdAndUpdate(bidId, { $set: { status: BidStatus.WITHDRAWN, updatedAt: new Date() } }, { new: true })
-          .lean();
-
-        const lot = await this.cropLotModel.findById(bid.lotId).lean();
-        await this.auditService.log({
-          actorId: buyerId,
-          action: AuditAction.BID_CANCELLED,
-          lotId: bid.lotId,
-          bidId,
-          oldStatus: 'PENDING',
-          newStatus: 'WITHDRAWN',
-        });
-
-        if (lot) {
-          await this.notificationsService.create({
-            recipientId: lot.farmerId,
-            type: NotificationType.BID_CANCELLED,
-            title: 'Bid Withdrawn by Buyer',
-            message: `A buyer has withdrawn their bid on your crop lot.`,
-            entityType: 'BID',
-            entityId: bidId,
-          });
-        }
-
-        return { ...updated, id: updated?._id };
-      }
-    } catch (err: any) {
-      if (err instanceof BadRequestException || err instanceof ForbiddenException) throw err;
-      this.logger.warn(`MongoDB cancelBid fallback: ${err.message}`);
+  async cancelBid(bidId: string, buyerId: string, userRole: Role, reason?: string) {
+    const bid = await this.bidModel.findById(bidId).lean();
+    if (!bid) {
+      throw new NotFoundException(`Bid with ID ${bidId} not found.`);
     }
 
-    const bid = FALLBACK_BIDS.find((b) => b.id === bidId || b._id === bidId);
-    if (!bid) throw new NotFoundException(`Bid with ID ${bidId} not found.`);
     if (bid.buyerId !== buyerId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('You are not authorized to cancel this bid.');
+      throw new ForbiddenException('You can only cancel your own bids.');
     }
     if (bid.status !== BidStatus.PENDING) {
-      throw new BadRequestException(`Cannot cancel bid with status ${bid.status}. Only PENDING bids can be withdrawn.`);
+      throw new BadRequestException('Only PENDING bids can be cancelled.');
     }
 
-    bid.status = BidStatus.WITHDRAWN;
-    bid.updatedAt = new Date();
+    const updated = await this.bidModel
+      .findByIdAndUpdate(
+        bidId,
+        { $set: { status: BidStatus.WITHDRAWN, updatedAt: new Date() } },
+        { new: true },
+      )
+      .lean();
+
+    const lot = await this.cropLotModel.findById(bid.lotId).lean();
+    const buyer = await this.userModel.findById(buyerId).lean();
+    const crop = lot ? await this.cropModel.findById(lot.cropId).lean() : null;
+
+    if (lot) {
+      const remainingPending = await this.bidModel.countDocuments({
+        lotId: lot._id,
+        status: BidStatus.PENDING,
+      });
+      if (remainingPending === 0 && lot.status === CropLotStatus.BIDDING) {
+        await this.cropLotModel.findByIdAndUpdate(lot._id, {
+          $set: { status: CropLotStatus.OPEN },
+        });
+      }
+
+      await this.notificationsService.create({
+        recipientId: lot.farmerId,
+        type: NotificationType.BID_CANCELLED,
+        title: 'Bid Cancelled / Withdrawn',
+        message: `${buyer?.name || 'A buyer'} withdrew their offer of ₹${bid.price}/${lot.unit}.${reason ? ` Reason: ${reason}` : ''}`,
+        entityType: 'LOT',
+        entityId: lot._id,
+      });
+    }
 
     await this.auditService.log({
       actorId: buyerId,
       action: AuditAction.BID_CANCELLED,
       lotId: bid.lotId,
-      bidId,
-      oldStatus: 'PENDING',
-      newStatus: 'WITHDRAWN',
+      bidId: bidId,
+      metadata: { reason: reason || 'Withdrawn by buyer', buyerName: buyer?.name },
     });
 
-    return { ...bid, id: bid._id || bid.id };
+    return this.enrichBid(updated, lot, buyer);
   }
 
   async acceptBid(bidId: string, farmerId: string, userRole: Role) {
-    try {
-      const bid = await this.bidModel.findById(bidId).lean();
-      if (bid) {
-        const lot = await this.cropLotModel.findById(bid.lotId).lean();
-        if (!lot) throw new NotFoundException('Crop lot not found.');
-        if (lot.farmerId !== farmerId && userRole !== Role.ADMIN) {
-          throw new ForbiddenException('You are not authorized to accept bids on this lot.');
-        }
-        if (bid.status !== BidStatus.PENDING) {
-          throw new BadRequestException(`Cannot accept bid with status ${bid.status}.`);
-        }
-
-        const totalAmount = bid.price * bid.quantity;
-        const txnId = `txn-${Date.now()}`;
-        const paymentId = `pay-${Date.now()}`;
-
-        // Atomic update session
-        const session = await this.connection.startSession().catch(() => null);
-        if (session) {
-          session.startTransaction();
-          try {
-            await this.bidModel.findByIdAndUpdate(bidId, { $set: { status: BidStatus.ACCEPTED } }, { session });
-            await this.bidModel.updateMany(
-              { lotId: bid.lotId, _id: { $ne: bidId }, status: BidStatus.PENDING },
-              { $set: { status: BidStatus.REJECTED } },
-              { session },
-            );
-            await this.cropLotModel.findByIdAndUpdate(bid.lotId, { $set: { status: CropLotStatus.SOLD } }, { session });
-            await this.transactionModel.create(
-              [
-                {
-                  _id: txnId,
-                  lotId: bid.lotId,
-                  buyerId: bid.buyerId,
-                  farmerId: lot.farmerId,
-                  acceptedBidId: bidId,
-                  agreedPrice: bid.price,
-                  quantity: bid.quantity,
-                  totalAmount,
-                  status: TransactionStatus.INITIATED,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                },
-              ],
-              { session },
-            );
-            await this.paymentModel.create(
-              [
-                {
-                  _id: paymentId,
-                  transactionId: txnId,
-                  amount: totalAmount,
-                  status: PaymentStatus.PENDING,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                },
-              ],
-              { session },
-            );
-            await session.commitTransaction();
-          } catch (err: any) {
-            await session.abortTransaction();
-            throw err;
-          } finally {
-            session.endSession();
-          }
-        } else {
-          // Direct execution without replica set transactions
-          await this.bidModel.findByIdAndUpdate(bidId, { $set: { status: BidStatus.ACCEPTED } });
-          await this.bidModel.updateMany(
-            { lotId: bid.lotId, _id: { $ne: bidId }, status: BidStatus.PENDING },
-            { $set: { status: BidStatus.REJECTED } },
-          );
-          await this.cropLotModel.findByIdAndUpdate(bid.lotId, { $set: { status: CropLotStatus.SOLD } });
-          await this.transactionModel.create({
-            _id: txnId,
-            lotId: bid.lotId,
-            buyerId: bid.buyerId,
-            farmerId: lot.farmerId,
-            acceptedBidId: bidId,
-            agreedPrice: bid.price,
-            quantity: bid.quantity,
-            totalAmount,
-            status: TransactionStatus.INITIATED,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          });
-          await this.paymentModel.create({
-            _id: paymentId,
-            transactionId: txnId,
-            amount: totalAmount,
-            status: PaymentStatus.PENDING,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          });
-        }
-
-        await this.auditService.log({
-          actorId: farmerId,
-          action: AuditAction.BID_ACCEPTED,
-          lotId: bid.lotId,
-          bidId,
-          price: bid.price,
-          newQuantity: bid.quantity,
-        });
-
-        await this.notificationsService.create({
-          recipientId: bid.buyerId,
-          type: NotificationType.BID_ACCEPTED,
-          title: 'Your Bid Was Accepted!',
-          message: `The farmer accepted your offer of ₹${bid.price} for ${bid.quantity} ${lot.unit}. Transaction initiated.`,
-          entityType: 'TRANSACTION',
-          entityId: txnId,
-        });
-
-        return {
-          id: bidId,
-          status: BidStatus.ACCEPTED,
-          lot: { id: lot._id, status: CropLotStatus.SOLD },
-          transaction: { id: txnId, totalAmount, status: TransactionStatus.INITIATED },
-        };
-      }
-    } catch (err: any) {
-      if (err instanceof BadRequestException || err instanceof ForbiddenException) throw err;
-      this.logger.warn(`MongoDB acceptBid fallback: ${err.message}`);
+    const bid = await this.bidModel.findById(bidId).lean();
+    if (!bid) {
+      throw new NotFoundException(`Bid with ID ${bidId} not found.`);
     }
 
-    return this.acceptBidInMemory(bidId, farmerId, userRole);
-  }
-
-  private async acceptBidInMemory(bidId: string, farmerId: string, userRole: Role) {
-    const bid = FALLBACK_BIDS.find((b) => b.id === bidId || b._id === bidId);
-    if (!bid) throw new NotFoundException(`Bid with ID ${bidId} not found.`);
-
-    const lot = FALLBACK_LOTS.find((l) => l.id === bid.lotId || l._id === bid.lotId);
-    if (!lot) throw new NotFoundException(`Lot with ID ${bid.lotId} not found.`);
+    const lot = await this.cropLotModel.findById(bid.lotId).lean();
+    if (!lot) {
+      throw new NotFoundException(`Lot with ID ${bid.lotId} not found.`);
+    }
 
     if (lot.farmerId !== farmerId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('You are not authorized to accept bids on this lot.');
+      throw new ForbiddenException('You are not authorized to accept bids for this lot.');
+    }
+    if (lot.status === CropLotStatus.SOLD) {
+      throw new BadRequestException('This lot has already been sold.');
     }
     if (bid.status !== BidStatus.PENDING) {
-      throw new BadRequestException(`Cannot accept bid with status ${bid.status}.`);
+      throw new BadRequestException('Only PENDING bids can be accepted.');
     }
-
-    bid.status = BidStatus.ACCEPTED;
-    lot.status = CropLotStatus.SOLD;
-
-    FALLBACK_BIDS.forEach((b) => {
-      if (b.lotId === lot.id && b.id !== bidId && b.status === BidStatus.PENDING) {
-        b.status = BidStatus.REJECTED;
-      }
-    });
 
     const totalAmount = bid.price * bid.quantity;
     const txnId = `txn-${Date.now()}`;
     const paymentId = `pay-${Date.now()}`;
 
-    const newPayment = {
+    // Execute atomic state transitions
+    await this.bidModel.findByIdAndUpdate(bidId, { $set: { status: BidStatus.ACCEPTED } });
+    await this.cropLotModel.findByIdAndUpdate(lot._id, { $set: { status: CropLotStatus.SOLD } });
+
+    // Reject competing bids
+    await this.bidModel.updateMany(
+      { lotId: lot._id, _id: { $ne: bidId }, status: BidStatus.PENDING },
+      { $set: { status: BidStatus.REJECTED } },
+    );
+
+    // Create Transaction
+    const transaction = await this.transactionModel.create({
+      _id: txnId,
+      lotId: lot._id,
+      bidId: bidId,
+      farmerId: lot.farmerId,
+      buyerId: bid.buyerId,
+      agreedPrice: bid.price,
+      quantity: bid.quantity,
+      totalAmount: totalAmount,
+      status: TransactionStatus.COMPLETED,
+      completedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Create Payment
+    const payment = await this.paymentModel.create({
       _id: paymentId,
-      id: paymentId,
       transactionId: txnId,
       amount: totalAmount,
-      status: PaymentStatus.PENDING,
+      status: PaymentStatus.PAID,
+      paymentMethod: 'UPI_DIRECT_APMC',
+      paymentReference: `VNJ-UPI-${Date.now()}`,
+      paidAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    };
-    FALLBACK_PAYMENTS.unshift(newPayment);
+    });
 
-    const newTxn = {
-      _id: txnId,
-      id: txnId,
-      lotId: lot.id,
-      buyerId: bid.buyerId,
-      farmerId: lot.farmerId,
-      acceptedBidId: bidId,
-      agreedPrice: bid.price,
-      quantity: bid.quantity,
-      totalAmount,
-      status: TransactionStatus.INITIATED,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      payment: newPayment,
-      buyer: bid.buyer || { name: 'FreshCart Agro Ltd.', district: 'Mumbai' },
-      farmer: lot.farmer || { name: 'Ramesh Patel', district: 'Nashik' },
-    };
-    FALLBACK_TRANSACTIONS.unshift(newTxn);
+    const buyer = await this.userModel.findById(bid.buyerId).lean();
+    const farmer = await this.userModel.findById(lot.farmerId).lean();
+    const crop = await this.cropModel.findById(lot.cropId).lean();
 
-    lot.transaction = {
-      id: txnId,
-      agreedPrice: bid.price,
-      quantity: bid.quantity,
-      totalAmount,
-      status: TransactionStatus.INITIATED,
-      buyer: bid.buyer || { name: 'FreshCart Agro Ltd.' },
-      payment: { status: PaymentStatus.PENDING },
-    };
-
+    // Audit logs
     await this.auditService.log({
       actorId: farmerId,
       action: AuditAction.BID_ACCEPTED,
-      lotId: lot.id,
-      bidId,
+      lotId: lot._id,
+      bidId: bidId,
+      transactionId: txnId,
       price: bid.price,
       newQuantity: bid.quantity,
+      metadata: { buyerName: buyer?.name, cropName: crop?.name, totalAmount },
     });
 
+    await this.auditService.log({
+      actorId: 'SYSTEM',
+      action: AuditAction.TRANSACTION_COMPLETED,
+      lotId: lot._id,
+      transactionId: txnId,
+      paymentId: paymentId,
+      price: bid.price,
+      metadata: { totalAmount, paymentRef: payment.paymentReference },
+    });
+
+    // Notify Buyer
     await this.notificationsService.create({
       recipientId: bid.buyerId,
       type: NotificationType.BID_ACCEPTED,
-      title: 'Your Bid Was Accepted!',
-      message: `The farmer accepted your offer of ₹${bid.price} for ${bid.quantity} ${lot.unit}. Transaction initiated.`,
+      title: 'Congratulations! Your Bid Was Accepted',
+      message: `${farmer?.name || 'The farmer'} accepted your bid of ₹${bid.price}/${lot.unit} for ${bid.quantity} ${lot.unit} of ${crop?.name || 'crop'}. Total Trade Value: ₹${totalAmount.toLocaleString('en-IN')}.`,
       entityType: 'TRANSACTION',
       entityId: txnId,
     });
 
-    return {
-      id: bidId,
-      status: BidStatus.ACCEPTED,
-      lot: { id: lot.id, status: CropLotStatus.SOLD },
-      transaction: { id: txnId, totalAmount, status: TransactionStatus.INITIATED },
-    };
-  }
-
-  async rejectBid(bidId: string, farmerId: string, userRole: Role) {
-    try {
-      const bid = await this.bidModel.findById(bidId).lean();
-      if (bid) {
-        const lot = await this.cropLotModel.findById(bid.lotId).lean();
-        if (lot && lot.farmerId !== farmerId && userRole !== Role.ADMIN) {
-          throw new ForbiddenException('You are not authorized to reject bids on this lot.');
-        }
-
-        const updated = await this.bidModel
-          .findByIdAndUpdate(bidId, { $set: { status: BidStatus.REJECTED } }, { new: true })
-          .lean();
-
-        await this.auditService.log({
-          actorId: farmerId,
-          action: AuditAction.BID_REJECTED,
-          lotId: bid.lotId,
-          bidId,
-        });
-
-        await this.notificationsService.create({
-          recipientId: bid.buyerId,
-          type: NotificationType.BID_REJECTED,
-          title: 'Bid Rejected',
-          message: 'Your bid on the crop lot was rejected by the farmer.',
-          entityType: 'BID',
-          entityId: bidId,
-        });
-
-        return { ...updated, id: updated?._id };
-      }
-    } catch (err: any) {
-      if (err instanceof ForbiddenException || err instanceof BadRequestException) throw err;
-      this.logger.warn(`MongoDB rejectBid fallback: ${err.message}`);
-    }
-
-    const bid = FALLBACK_BIDS.find((b) => b.id === bidId || b._id === bidId);
-    if (!bid) throw new NotFoundException(`Bid with ID ${bidId} not found.`);
-    bid.status = BidStatus.REJECTED;
-
-    await this.auditService.log({
-      actorId: farmerId,
-      action: AuditAction.BID_REJECTED,
-      lotId: bid.lotId,
-      bidId,
+    // Notify Farmer
+    await this.notificationsService.create({
+      recipientId: lot.farmerId,
+      type: NotificationType.PAYMENT_PAID,
+      title: 'Trade Settlement Completed',
+      message: `Full direct payment of ₹${totalAmount.toLocaleString('en-IN')} for lot #${lot._id} has been credited to your verified bank account via zero-commission settlement.`,
+      entityType: 'PAYMENT',
+      entityId: paymentId,
     });
 
-    return { ...bid, id: bid._id || bid.id };
+    return {
+      success: true,
+      message: 'Bid accepted and transaction completed successfully.',
+      transaction: {
+        ...transaction.toObject(),
+        id: transaction._id,
+        payment: { ...payment.toObject(), id: payment._id },
+        buyer: buyer ? { name: buyer.name, district: buyer.district } : { name: 'Buyer' },
+        farmer: farmer ? { name: farmer.name, district: farmer.district } : { name: 'Farmer' },
+        crop: crop || { name: 'Crop' },
+      },
+    };
   }
 }
